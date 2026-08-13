@@ -124,3 +124,4 @@ bin/
 .cursor/
 .vscode/
 libs/
+mise.toml

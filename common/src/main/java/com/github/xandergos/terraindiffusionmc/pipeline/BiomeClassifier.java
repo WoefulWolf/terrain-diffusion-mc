@@ -32,13 +32,36 @@ public final class BiomeClassifier {
         return fnl;
     }
 
-    // Biome IDs
+    // Ids are indices into vanilla's Biomes registration order: plains 1, deep_dark 53.
+    // Sparse variants with no vanilla equivalent use base + 100.
     static final short PLAINS = 1, SNOWY_PLAINS = 3, DESERT = 5, SWAMP = 6;
     static final short FOREST = 8, TAIGA = 15, SNOWY_TAIGA = 16, SAVANNA = 17;
     static final short WINDSWEPT_HILLS = 19, JUNGLE = 23, BADLANDS = 26, MEADOW = 29;
     static final short GROVE = 31, SNOWY_SLOPES = 32, FROZEN_PEAKS = 33, STONY_PEAKS = 35;
     static final short WARM_OCEAN = 41, OCEAN = 44, COLD_OCEAN = 46, FROZEN_OCEAN = 48;
     static final short FOREST_SPARSE = 108, TAIGA_SPARSE = 115, SNOWY_TAIGA_SPARSE = 116;
+
+    static final short ICE_SPIKES = 4, MANGROVE_SWAMP = 7, BIRCH_FOREST = 10, DARK_FOREST = 11;
+    static final short OLD_GROWTH_BIRCH_FOREST = 12, OLD_GROWTH_PINE_TAIGA = 13;
+    static final short OLD_GROWTH_SPRUCE_TAIGA = 14, SAVANNA_PLATEAU = 18;
+    static final short WINDSWEPT_GRAVELLY_HILLS = 20, WINDSWEPT_FOREST = 21, WINDSWEPT_SAVANNA = 22;
+    static final short SPARSE_JUNGLE = 24, BAMBOO_JUNGLE = 25, ERODED_BADLANDS = 27;
+    static final short WOODED_BADLANDS = 28, JAGGED_PEAKS = 34, LUKEWARM_OCEAN = 42;
+    static final short DEEP_LUKEWARM_OCEAN = 43, DEEP_OCEAN = 45, DEEP_COLD_OCEAN = 47;
+    static final short DEEP_FROZEN_OCEAN = 49;
+
+    // Thresholds separating each variant from its parent biome. All empirical.
+    private static final float DEEP_OCEAN_DEPTH_M = -1800f;
+    private static final float JAGGED_PEAKS_MIN_ALT_M = 3200f;
+    private static final float BADLANDS_MIN_ALT_M = 900f;
+    private static final float WOODED_BADLANDS_MAX_MOISTURE = 0.35f;
+    private static final float SAVANNA_PLATEAU_MIN_ALT_M = 900f;
+    private static final float BAMBOO_JUNGLE_MIN_PRECIP_MM = 2200f;
+    private static final float DARK_FOREST_MIN_MOISTURE = 1.05f;
+    private static final float OLD_GROWTH_MIN_MOISTURE = 1.10f;
+    private static final float BIRCH_FOREST_MAX_TEMP_C = 15f;
+    private static final float ICE_SPIKES_MAX_PRECIP_MM = 220f;
+    private static final float ICE_SPIKES_MAX_SLOPE = 0.15f;
 
     /**
      * Classify biomes for a grid of pixels.
@@ -169,52 +192,77 @@ public final class BiomeClassifier {
                 short biome = PLAINS;
 
                 if (isOcean) {
-                    if (frozen) biome = FROZEN_OCEAN;
-                    else if (cold) biome = COLD_OCEAN;
-                    else if (warm || hot) biome = WARM_OCEAN;
-                    else biome = OCEAN;
+                    boolean deep = elevVal < DEEP_OCEAN_DEPTH_M;
+                    if (frozen) biome = deep ? DEEP_FROZEN_OCEAN : FROZEN_OCEAN;
+                    else if (cold) biome = deep ? DEEP_COLD_OCEAN : COLD_OCEAN;
+                    else if (hot) biome = WARM_OCEAN;   // vanilla has no deep warm ocean
+                    else if (warm) biome = deep ? DEEP_LUKEWARM_OCEAN : LUKEWARM_OCEAN;
+                    else biome = deep ? DEEP_OCEAN : OCEAN;
                 } else if (mountains) {
                     if (slopeBare) {
-                        biome = hasSnow ? FROZEN_PEAKS : STONY_PEAKS;
+                        if (hasSnow) biome = altM > JAGGED_PEAKS_MIN_ALT_M ? JAGGED_PEAKS : FROZEN_PEAKS;
+                        else biome = STONY_PEAKS;
                     } else if (hasSnow) {
                         if (treesNone) biome = SNOWY_SLOPES;
                         else if (treesSparse || treesForest) biome = SNOWY_TAIGA_SPARSE;
                         else biome = SNOWY_TAIGA;
                     } else if (treesNone) {
-                        if (barren) biome = WINDSWEPT_HILLS;
+                        if (barren) biome = slopeMedium ? WINDSWEPT_GRAVELLY_HILLS : WINDSWEPT_HILLS;
                         else if (treeMoisture < 0.35f || precip < 350f) biome = GROVE;
-                        else biome = PLAINS;
+                        else biome = MEADOW;
                     } else if (treesSparse || treesForest) {
-                        biome = TAIGA_SPARSE;
+                        biome = slopeMedium ? WINDSWEPT_FOREST : TAIGA_SPARSE;
                     } else {
                         biome = TAIGA;
                     }
                 } else {
                     // Lowland/midland
                     if (hasSnow && treesNone) {
-                        biome = SNOWY_PLAINS;
+                        boolean spikes = frozen && precip < ICE_SPIKES_MAX_PRECIP_MM
+                                && slope < ICE_SPIKES_MAX_SLOPE;
+                        biome = spikes ? ICE_SPIKES : SNOWY_PLAINS;
                     } else if (hasSnow) {
                         biome = (treesSparse || treesForest) ? SNOWY_TAIGA_SPARSE : SNOWY_TAIGA;
                     } else if (treesNone) {
-                        if (warm || hot) biome = DESERT;
+                        if (hot && altM > BADLANDS_MIN_ALT_M) {
+                            biome = slopeMedium ? ERODED_BADLANDS : BADLANDS;
+                        }
+                        else if (warm || hot) biome = DESERT;
                         else if (barren && !lowland && (cold || cool || temperate)) biome = GROVE;
                         else if (treeMoisture < 0.35f || precip < 350f) biome = GROVE;
                         else biome = PLAINS;
                     } else if (treesSparse || treesForest) {
-                        if (hot) biome = JUNGLE;
-                        else if (warm && treesSparse && !slopeMedium) biome = SAVANNA;
+                        if (hot) {
+                            if (altM > BADLANDS_MIN_ALT_M && treeMoisture < WOODED_BADLANDS_MAX_MOISTURE) {
+                                biome = WOODED_BADLANDS;
+                            } else {
+                                biome = treesSparse ? SPARSE_JUNGLE : JUNGLE;
+                            }
+                        }
+                        else if (warm && treesSparse && slopeMedium) biome = WINDSWEPT_SAVANNA;
+                        else if (warm && treesSparse) {
+                            biome = altM > SAVANNA_PLATEAU_MIN_ALT_M ? SAVANNA_PLATEAU : SAVANNA;
+                        }
                         else if (warm && treesForest) biome = FOREST_SPARSE;
                         else if (temperate) biome = FOREST_SPARSE;
                         else biome = TAIGA_SPARSE;
                     } else if (treesDense) {
-                        if (hot) biome = JUNGLE;
+                        if (hot) biome = precip > BAMBOO_JUNGLE_MIN_PRECIP_MM ? BAMBOO_JUNGLE : JUNGLE;
                         else if (warm && lowland) biome = SWAMP;
-                        else if (cool || cold) biome = TAIGA;
+                        else if (cool || cold) {
+                            biome = effTreeMoisture >= OLD_GROWTH_MIN_MOISTURE ? OLD_GROWTH_PINE_TAIGA : TAIGA;
+                        }
+                        else if (temperate && effTreeMoisture >= DARK_FOREST_MIN_MOISTURE) biome = DARK_FOREST;
+                        else if (temperate && temp < BIRCH_FOREST_MAX_TEMP_C) biome = BIRCH_FOREST;
                         else biome = FOREST;
                     } else { // rainforest
-                        if (hot || (warm && temp >= 18f && tStd < 5f)) biome = JUNGLE;
+                        if (hot && lowland) biome = MANGROVE_SWAMP;
+                        else if (hot || (warm && temp >= 18f && tStd < 5f)) {
+                            biome = precip > BAMBOO_JUNGLE_MIN_PRECIP_MM ? BAMBOO_JUNGLE : JUNGLE;
+                        }
                         else if (lowland) biome = SWAMP;
-                        else if (cool || cold) biome = TAIGA;
+                        else if (cool || cold) biome = OLD_GROWTH_SPRUCE_TAIGA;
+                        else if (temperate && temp < BIRCH_FOREST_MAX_TEMP_C) biome = OLD_GROWTH_BIRCH_FOREST;
                         else biome = FOREST;
                     }
                 }

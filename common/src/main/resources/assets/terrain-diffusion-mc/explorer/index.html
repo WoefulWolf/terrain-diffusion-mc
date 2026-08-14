@@ -523,6 +523,12 @@
     <div class="section">
       <div class="section-title">Coarse Channel</div>
       <div class="channel-grid" id="channel-buttons"></div>
+      <div class="filter-row" id="river-controls" style="display:none">
+        <label for="river-pct">River density</label>
+        <input type="number" id="river-pct" value="4" min="0.1" max="50" step="0.5">
+        <span class="coord-scale-lbl">% of basin flow (lower = more)</span>
+      </div>
+      <div class="panel-info" id="river-info"></div>
     </div>
 
     <!-- Filter -->
@@ -645,6 +651,9 @@
   const btnSetSeed      = document.getElementById('btn-set-seed');
   const btnNewSeed      = document.getElementById('btn-new-seed');
   const channelButtons  = document.getElementById('channel-buttons');
+  const riverPct        = document.getElementById('river-pct');
+  const riverControls   = document.getElementById('river-controls');
+  const riverInfo       = document.getElementById('river-info');
   const filterEnable    = document.getElementById('filter-enable');
   const filterChannels  = document.getElementById('filter-channels');
   const btnStats        = document.getElementById('btn-stats');
@@ -802,10 +811,16 @@
   }
 
   // ── URL builders ──
+  let RIVER_CHANNEL = -1;
+
   function coarseUrl() {
     const { seed, channel, coarseOffsetI, coarseOffsetJ, coarseWindow } = state;
     const ci0 = coarseOffsetI - coarseWindow, ci1 = coarseOffsetI + coarseWindow;
     const cj0 = coarseOffsetJ - coarseWindow, cj1 = coarseOffsetJ + coarseWindow;
+    if (channel === RIVER_CHANNEL) {
+      const pct = parseFloat(riverPct.value) || 4;
+      return `/api/rivers.png?ci0=${ci0}&ci1=${ci1}&cj0=${cj0}&cj1=${cj1}&river_pct=${pct}&_s=${seed}`;
+    }
     let url = `/api/coarse.png?channel=${channel}&ci0=${ci0}&ci1=${ci1}&cj0=${cj0}&cj1=${cj1}&_s=${seed}`;
     if (filterEnable.checked) {
       CHANNEL_META.forEach(({ ch }) => {
@@ -980,17 +995,33 @@
   // ── Channel buttons ──
   function buildChannelButtons(names) {
     channelButtons.innerHTML = '';
-    names.forEach((name, i) => {
+    // Rivers is a derived layer rather than a model channel, so it sits past the real
+    // channels and swaps the endpoint in coarseUrl().
+    RIVER_CHANNEL = names.length;
+    const labels = names.concat(['Rivers']);
+    labels.forEach((name, i) => {
       const btn = document.createElement('button');
       btn.textContent = name;
       if (i === state.channel) btn.classList.add('active');
       btn.addEventListener('click', () => {
         state.channel = i;
         channelButtons.querySelectorAll('button').forEach((b, j) => b.classList.toggle('active', j === i));
+        updateRiverControls();
         loadCoarse();
       });
       channelButtons.appendChild(btn);
     });
+    // Assigned rather than added, so rebuilding the buttons cannot stack listeners.
+    riverPct.onchange = () => { if (state.channel === RIVER_CHANNEL) loadCoarse(); };
+    updateRiverControls();
+  }
+
+  function updateRiverControls() {
+    const on = state.channel === RIVER_CHANNEL;
+    riverControls.style.display = on ? '' : 'none';
+    riverInfo.textContent = on
+      ? 'blue = lakes, cyan/white = rivers by discharge, brighter is bigger'
+      : '';
   }
 
   // ── Detail mode ──

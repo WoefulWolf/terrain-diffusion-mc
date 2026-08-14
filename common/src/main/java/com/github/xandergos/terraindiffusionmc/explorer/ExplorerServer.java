@@ -4,6 +4,7 @@ import com.github.xandergos.terraindiffusionmc.config.TerrainDiffusionConfig;
 import com.github.xandergos.terraindiffusionmc.infinitetensor.FloatTensor;
 import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider;
 import com.github.xandergos.terraindiffusionmc.pipeline.WorldPipelineModelConfig;
+import com.github.xandergos.terraindiffusionmc.pipeline.river.CoarseHydrology;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleManager;
 import com.google.gson.Gson;
 import com.sun.net.httpserver.HttpExchange;
@@ -43,6 +44,9 @@ public final class ExplorerServer {
     private static final Gson GSON = new Gson();
 
     private static final String[] CHANNEL_NAMES = {"Elev", "p5", "Temp", "T std", "Precip", "Precip CV"};
+
+    /** Smallest basin, in coarse cells of rainfall, that carries a river at all. */
+    private static final float MIN_BASIN_CELLS = 12f;
     private static final float NATIVE_RESOLUTION = WorldPipelineModelConfig.nativeResolution();
 
     private static volatile HttpServer SERVER;
@@ -69,6 +73,7 @@ public final class ExplorerServer {
         server.createContext("/api/coarse.png", ExplorerServer::handleCoarsePng);
         server.createContext("/api/coarse_data.json", ExplorerServer::handleCoarseData);
         server.createContext("/api/coarse_stats", ExplorerServer::handleCoarseStats);
+        server.createContext("/api/rivers.png", ExplorerServer::handleRiversPng);
         server.createContext("/api/detail.png", ExplorerServer::handleDetailPng);
         server.createContext("/api/detail_raw", ExplorerServer::handleDetailRaw);
         // Single-thread executor matches Python's threaded=False
@@ -249,6 +254,93 @@ public final class ExplorerServer {
      * GET /api/coarse_data.json — port of coarse_data().
      * Returns all 6 channel values as 2D arrays for client-side hover.
      */
+    /**
+     * Renders the coarse drainage network: shaded land, lakes, and rivers coloured by
+     * discharge. Debug view for the river work; see {@code docs/RIVERS.md}.
+     *
+     * <p>{@code river_pct} is the share of its own basin's outflow a cell must carry to
+     * count as river.
+     */
+    private static void handleRiversPng(HttpExchange ex) throws IOException {
+        if (!ex.getRequestMethod().equalsIgnoreCase("GET")) { send405(ex); return; }
+        try {
+            Map<String, String> q = parseQuery(ex.getRequestURI());
+            int ci0 = getInt(q, "ci0", -50), ci1 = getInt(q, "ci1", 50);
+            int cj0 = getInt(q, "cj0", -50), cj1 = getInt(q, "cj1", 50);
+            Float pct = getFloat(q, "river_pct");
+            float riverPct = pct == null ? 2f : Math.max(0.01f, Math.min(100f, pct));
+
+            int H = ci1 - ci0, W = cj1 - cj0;
+            float[] elev = coarseChannel(ci0, ci1, cj0, cj1, 0);
+            float[] precip = coarseChannel(ci0, ci1, cj0, cj1, 4);
+
+            CoarseHydrology.Drainage d = CoarseHydrology.analyse(elev, precip, H, W);
+
+            float fraction = riverPct / 100f;
+            float maxDischarge = 0f, precipSum = 0f;
+            int landCount = 0;
+            float landLo = Float.MAX_VALUE, landHi = -Float.MAX_VALUE;
+            for (int i = 0; i < H * W; i++) {
+                if (d.ocean[i]) continue;
+                landCount++;
+                precipSum += Math.max(0f, precip[i]);
+                maxDischarge = Math.max(maxDischarge, d.discharge[i]);
+                landLo = Math.min(landLo, elev[i]);
+                landHi = Math.max(landHi, elev[i]);
+            }
+            if (landHi <= landLo) landHi = landLo + 1f;
+
+            // Whether a basin holds a river at all gates on its total outflow; how far up
+            // it the river runs is the fraction. Keeping them separate stops islets from
+            // sprouting rivers while still letting every real island have one.
+            float meanPrecip = landCount > 0 ? precipSum / landCount : 0f;
+            float minBasinOutflow = MIN_BASIN_CELLS * meanPrecip;
+
+            float[][] rgba = new float[4][H * W];
+            int riverCells = 0, lakeCells = 0;
+            float logMax = (float) Math.log1p(Math.max(maxDischarge, 1f));
+
+            for (int i = 0; i < H * W; i++) {
+                float r, g, b;
+                boolean isRiver = d.basinOutflow[i] >= minBasinOutflow
+                        && d.discharge[i] >= d.basinOutflow[i] * fraction;
+                if (d.ocean[i]) {
+                    r = 0.05f; g = 0.11f; b = 0.24f;
+                } else if (d.lake[i]) {
+                    r = 0.16f; g = 0.44f; b = 0.74f;
+                    lakeCells++;
+                } else if (isRiver) {
+                    // Bigger rivers run brighter, so trunk and tributary are separable.
+                    float t = clamp01((float) Math.log1p(d.discharge[i]) / Math.max(1e-6f, logMax));
+                    r = 0.25f + 0.75f * t;
+                    g = 0.70f + 0.30f * t;
+                    b = 0.95f + 0.05f * t;
+                    riverCells++;
+                } else {
+                    float t = clamp01((elev[i] - landLo) / (landHi - landLo));
+                    r = 0.22f + 0.62f * t; g = 0.24f + 0.60f * t; b = 0.20f + 0.55f * t;
+                }
+                rgba[0][i] = r; rgba[1][i] = g; rgba[2][i] = b; rgba[3][i] = 1f;
+            }
+
+            byte[] png = toPng(rgba, H, W);
+            ex.getResponseHeaders().set("Content-Type", "image/png");
+            ex.getResponseHeaders().set("X-River-Threshold", String.format("%.1f", minBasinOutflow));
+            ex.getResponseHeaders().set("X-River-Max", String.format("%.1f", maxDischarge));
+            ex.getResponseHeaders().set("X-River-Cells", String.valueOf(riverCells));
+            ex.getResponseHeaders().set("X-Lake-Cells", String.valueOf(lakeCells));
+            ex.getResponseHeaders().set("Access-Control-Expose-Headers",
+                    "X-River-Threshold, X-River-Max, X-River-Cells, X-Lake-Cells");
+            ex.sendResponseHeaders(200, png.length);
+            ex.getResponseBody().write(png);
+        } catch (Exception e) {
+            LOG.error("rivers.png error", e);
+            sendError(ex, 400, e.getMessage());
+        } finally {
+            ex.close();
+        }
+    }
+
     private static void handleCoarseData(HttpExchange ex) throws IOException {
         if (!ex.getRequestMethod().equalsIgnoreCase("GET")) { send405(ex); return; }
         try {

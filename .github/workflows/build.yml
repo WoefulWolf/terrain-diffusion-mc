@@ -1,10 +1,4 @@
-# Manually triggered build, stamped with the build datetime so no version ever needs
-# incrementing by hand. Defaults to the Windows/DirectML variant only; pick "all" for a
-# full release of every loader and runtime variant.
-#
-# The variant tasks respawn child gradlew processes, so everything that must reach the
-# actual builds (version override, caching, daemon) rides environment variables rather
-# than command-line flags, which children would never see.
+# Manual build, versioned by build datetime. Defaults to Windows/DirectML only.
 name: Build
 
 on:
@@ -27,9 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      # The project's gradle.properties disables the daemon; in CI a shared daemon lets
-      # the gradle invocations of a multi-variant build reuse one warm JVM, and the
-      # build cache lets the variants compile the common sources once.
+      # Env so the flags reach the child gradlew processes the variant tasks spawn.
       GRADLE_OPTS: -Dorg.gradle.daemon=true -Dorg.gradle.caching=true -Dorg.gradle.parallel=true
     steps:
       - uses: actions/checkout@v6
@@ -39,13 +31,9 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      # Caches ~/.gradle/caches (dependencies, wrapper, Loom's remapped Minecraft) and
-      # the local build cache, keyed on the wrapper and build files. Writes on the
-      # default branch, restores everywhere.
       - uses: gradle/actions/setup-gradle@v6
 
-      # NeoForge's decompiled-and-recompiled Minecraft lives outside the Gradle caches;
-      # without this every cold run pays the several-minute NeoForm step again.
+      # NeoForm's recompiled Minecraft lives outside the Gradle caches.
       - name: Cache NeoForm runtime
         uses: actions/cache@v5
         with:
@@ -63,17 +51,15 @@ jobs:
           echo "BUILD_STAMP=${STAMP}" >> "$GITHUB_ENV"
           echo "Building ${VERSION} (${{ inputs.variant }})"
 
+      # Leading colon: run the root task only, not the loaders' same-named copies.
       - name: Build Windows/DirectML jars
         if: inputs.variant == 'windows'
-        run: ./gradlew buildWindows
+        run: ./gradlew :buildWindows
 
       - name: Build all release jars
         if: inputs.variant == 'all'
-        run: ./gradlew collectReleaseJars
+        run: ./gradlew :collectReleaseJars
 
-      # One artifact per loader per variant, so downloading DirectML never drags the
-      # CUDA jar's bundled native libraries along. Windows always uploads; CUDA and CPU
-      # only exist on a full release build.
       - name: Upload Fabric Windows/DirectML
         uses: actions/upload-artifact@v6
         with:

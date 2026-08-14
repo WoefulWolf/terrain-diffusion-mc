@@ -70,6 +70,7 @@ public final class BiomeClassifier {
     private static final float BIRCH_FOREST_MAX_TEMP_C = 15f;
     private static final float ICE_SPIKES_MAX_PRECIP_MM = 220f;
     private static final float ICE_SPIKES_MAX_SLOPE = 0.15f;
+    private static final float DESERT_MAX_TREE_MOISTURE = 0.12f;
 
     /**
      * Classify biomes for a grid of pixels.
@@ -238,7 +239,14 @@ public final class BiomeClassifier {
                         if (hot && altM > BADLANDS_MIN_ALT_M) {
                             biome = slopeMedium ? ERODED_BADLANDS : BADLANDS;
                         }
-                        else if (warm || hot) biome = DESERT;
+                        else if (warm || hot) {
+                            // Sand needs genuine aridity. Semi-arid land that merely
+                            // cannot carry trees still carries grass: hot shrub-steppe
+                            // reads as savanna, warm steppe as plains. The moisture
+                            // signal already carries precip noise, so the edge dithers.
+                            if (treeMoisture < DESERT_MAX_TREE_MOISTURE) biome = DESERT;
+                            else biome = hot ? SAVANNA : PLAINS;
+                        }
                         else if (barren && !lowland && (cold || cool || temperate)) biome = GROVE;
                         else if (treeMoisture < 0.35f || precip < 350f) biome = GROVE;
                         else biome = PLAINS;

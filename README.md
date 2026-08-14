@@ -29,6 +29,15 @@ Coasts are read from the terrain the way real ones work: where the land meets th
 
 Mangroves themselves are held to real ecology rather than vanilla's rules: they are intertidal, so `mangrove_swamp` only grows where hot, soaked land sits nearly flat within a couple of metres of the sea and close to the coast. The same country further inland is rainforest, so it generates as jungle instead.
 
+### Climate realism
+
+Where vanilla convention and real-world logic disagree, this fork picks the real world:
+
+- **Sand needs genuine aridity.** Warm land that is merely too dry for trees keeps its grass cover — hot shrub-steppe generates as savanna and temperate steppe as plains, with true desert reserved for actually rain-starved country. Deserts shrink to their cores and fade out through grassland the way they should.
+- **Green river corridors.** Rivers water their margins, so a channel meandering through desert, savanna or badlands carries a ribbon of greenery — grass and acacias through sand, gallery forest through savanna — sized to the river and only where the bank sits within a few blocks of the water. A river that has cut itself a deep canyon leaves its stone walls bare.
+- **Marshy deltas.** A big slack river reaching the sea drops its sediment: the flats around the mouth silt over into swamp — mangrove where it is hot — rather than staying sandy beach. Steep or small mouths keep their sand and waterfalls.
+- **Lake margins.** Where warm, wet lowland meets a lake at nearly its own level, the shore turns to swamp fringe.
+
 ### Cave systems
 
 Cave generation now uses vanilla's Caves & Cliffs noise on top of the diffusion terrain: **cheese caverns, spaghetti tunnels, noodle caves, cave entrances and pillars**, alongside the carver tunnels and ravines that were already there. Aquifers are enabled to go with it, so caves below sea level are dry rather than flooded, with underground water and lava pockets where vanilla would put them.

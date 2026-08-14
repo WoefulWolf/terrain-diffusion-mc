@@ -520,6 +520,42 @@ public final class LocalTerrainProvider {
     private static final int SOURCE_FADE_MAX_BLOCKS = 96;
 
     /**
+     * Water-margin greening. Vegetation follows water it can actually reach, so a green
+     * corridor only grows where the bank sits within a few blocks of the river's own
+     * surface: a meandering channel at grade waters its margins, while one incised deep
+     * between stone walls leaves them bare and the desert canyon keeps its look. Reach
+     * grows with river size and breathes with slow noise.
+     */
+    private static final FastNoiseLite GREEN_NOISE = makeFnl(0x6BEE4, 1f / 120f, 2, 2f, 0.5f);
+    private static final float RIPARIAN_BASE_BLOCKS = 4f;
+    private static final float RIPARIAN_SIZE_BONUS_BLOCKS = 7f;
+    private static final float RIPARIAN_SIZE_REF_HALF = 12f;
+    private static final float RIPARIAN_WOBBLE_BLOCKS = 4f;
+    private static final float RIPARIAN_MAX_BANK_BLOCKS = 3.5f;
+    private static final float RIPARIAN_BANK_WOBBLE_BLOCKS = 1f;
+
+    /**
+     * Marshy deltas. A big slack river reaching the sea drops its sediment, so the low
+     * flats around the mouth silt over into marsh — swamp, or mangrove where it is hot —
+     * beaches included. Steep or small mouths keep their sand and waterfalls.
+     */
+    private static final float DELTA_MIN_HALF_BLOCKS = 6f;
+    private static final float DELTA_MAX_STEEP = 0.45f;
+    private static final int DELTA_STEEP_TAIL_BLOCKS = 24;
+    private static final float DELTA_REACH_FACTOR = 2.5f;
+    private static final float DELTA_MAX_REACH_BLOCKS = 64f;
+    private static final float DELTA_MAX_ELEV_BLOCKS = 2f;
+    private static final float DELTA_MIN_TEMP_C = 5f;
+    private static final float DELTA_MANGROVE_TEMP_C = 26f;
+
+    /** Swampy fringes where warm, wet lowland meets a lake at nearly its own level. */
+    private static final float LAKE_FRINGE_BASE_BLOCKS = 5f;
+    private static final float LAKE_FRINGE_WOBBLE_BLOCKS = 3f;
+    private static final float LAKE_FRINGE_MAX_RISE_BLOCKS = 1.5f;
+    private static final float LAKE_FRINGE_MIN_TEMP_C = 12f;
+    private static final float LAKE_FRINGE_MIN_PRECIP_MM = 600f;
+
+    /**
      * Depth grading where a river meets a lake. A lake floor sits a couple of blocks under
      * its surface while a big river runs far deeper; unblended, the bed would leap the
      * whole difference at the shoreline as an underwater cliff, with the last dry discs
@@ -585,6 +621,9 @@ public final class LocalTerrainProvider {
         // little waterfall, instead of riding out over the river on its higher surface.
         stampLakes(regions, elev, waterFlat, riverClassFlat, i1, j1, height, width,
                 metresPerBlock, freeboardMetres, params.lakeDepthBlocks, scale);
+        // Before the rivers, so a channel crossing a fringe stamps itself back on top.
+        stampLakeFringes(regions, elev, biomeFlat, climate, waterFlat, i1, j1, height, width,
+                metresPerBlock, freeboardMetres, scale);
 
         List<RiverRegions.RiverPath> paths = new ArrayList<>();
         for (RiverRegions.Region region : regions) paths.addAll(region.paths);
@@ -721,6 +760,11 @@ public final class LocalTerrainProvider {
                         edgeField, params, height, width, localPath, runHalf, runDepth,
                         runSurf, runSteep, runFade, metresPerBlock, count);
             }
+
+            stampRiparian(path, pHalf, pFade, biomeFlat, elev, waterFlat,
+                    i1, j1, height, width, metresPerBlock, freeboardMetres);
+            stampDelta(path, pHalf, pSteep, biomeFlat, elev, waterFlat, temperature,
+                    i1, j1, height, width, metresPerBlock);
         }
 
         featherBeds(elev, waterFlat, i1, j1, height, width, metresPerBlock,
@@ -781,6 +825,174 @@ public final class LocalTerrainProvider {
                     }
                 }
             }
+        }
+    }
+
+    /** Green corridors along rivers through dry country; see the constants above. */
+    private static void stampRiparian(RiverRegions.RiverPath path, float[] pHalf, float[] pFade,
+                                      short[] biomeFlat, float[] elev, float[] waterFlat,
+                                      int i1, int j1, int height, int width,
+                                      float metresPerBlock, float freeboardMetres) {
+        int len = path.blockX.length;
+        for (int k = 0; k < len; k++) {
+            int bx = path.blockX[k], bz = path.blockZ[k];
+            float wn = GREEN_NOISE.GetNoise(bx, bz);
+            float sizeT = Math.min(1f, pHalf[k] / RIPARIAN_SIZE_REF_HALF);
+            float beyond = (RIPARIAN_BASE_BLOCKS + RIPARIAN_SIZE_BONUS_BLOCKS * sizeT
+                    + RIPARIAN_WOBBLE_BLOCKS * wn) * pFade[k];
+            if (beyond <= 0f) continue;
+            float reach = pHalf[k] + beyond;
+
+            // Points outside the tile still green the part of their disc that overlaps it.
+            int R = (int) Math.ceil(reach);
+            int col = bx - j1, row = bz - i1;
+            if (col < -R || col >= width + R || row < -R || row >= height + R) continue;
+
+            float waterSurf = path.ground[k] - freeboardMetres;
+            float maxBank = (RIPARIAN_MAX_BANK_BLOCKS + RIPARIAN_BANK_WOBBLE_BLOCKS * wn)
+                    * metresPerBlock;
+
+            for (int dr = -R; dr <= R; dr++) {
+                int r = row + dr;
+                if (r < 0 || r >= height) continue;
+                for (int dc = -R; dc <= R; dc++) {
+                    int c = col + dc;
+                    if (c < 0 || c >= width) continue;
+                    if (dr * dr + dc * dc > reach * reach) continue;
+                    int idx = r * width + c;
+                    if (waterFlat[idx] != Float.NEGATIVE_INFINITY) continue;
+                    short green = riparianFor(biomeFlat[idx]);
+                    if (green == 0) continue;
+                    float bank = elev[idx] - waterSurf;
+                    if (bank < 0f || bank > maxBank) continue;
+                    biomeFlat[idx] = green;
+                }
+            }
+        }
+    }
+
+    private static short riparianFor(short biome) {
+        switch (biome) {
+            case BiomeClassifier.DESERT:
+            case BiomeClassifier.BADLANDS:
+                return BiomeClassifier.SAVANNA;
+            case BiomeClassifier.SAVANNA:
+                return BiomeClassifier.FOREST_SPARSE;
+            default:
+                return 0;
+        }
+    }
+
+    /** Marshy delta around a big slack ocean mouth; see the constants above. */
+    private static void stampDelta(RiverRegions.RiverPath path, float[] pHalf, float[] pSteep,
+                                   short[] biomeFlat, float[] elev, float[] waterFlat,
+                                   float[] temperature, int i1, int j1, int height, int width,
+                                   float metresPerBlock) {
+        int len = path.blockX.length;
+        if (path.ground[len - 1] >= MOUTH_GROUND_BLOCKS * metresPerBlock) return;
+        if (pHalf[len - 1] < DELTA_MIN_HALF_BLOCKS) return;
+
+        int tail = Math.min(len, DELTA_STEEP_TAIL_BLOCKS);
+        float steepSum = 0f;
+        for (int k = len - tail; k < len; k++) steepSum += pSteep[k];
+        if (steepSum / tail > DELTA_MAX_STEEP) return;
+
+        int bx = path.blockX[len - 1], bz = path.blockZ[len - 1];
+        float wn = GREEN_NOISE.GetNoise(bx, bz);
+        float reach = Math.min(DELTA_MAX_REACH_BLOCKS,
+                DELTA_REACH_FACTOR * pHalf[len - 1] * (1f + 0.3f * wn));
+        int R = (int) Math.ceil(reach);
+        int col = bx - j1, row = bz - i1;
+        if (col < -R || col >= width + R || row < -R || row >= height + R) return;
+
+        float maxElev = DELTA_MAX_ELEV_BLOCKS * metresPerBlock;
+        for (int dr = -R; dr <= R; dr++) {
+            int r = row + dr;
+            if (r < 0 || r >= height) continue;
+            for (int dc = -R; dc <= R; dc++) {
+                int c = col + dc;
+                if (c < 0 || c >= width) continue;
+                int idx = r * width + c;
+                float edge = reach * (1f + 0.2f * EDGE_NOISE.GetNoise(j1 + c, i1 + r));
+                if (dr * dr + dc * dc > edge * edge) continue;
+                if (waterFlat[idx] != Float.NEGATIVE_INFINITY) continue;
+                float e = elev[idx];
+                if (e < 0f || e > maxElev) continue;
+                if (!deltaReplaceable(biomeFlat[idx])) continue;
+                float temp = temperature != null ? temperature[idx] : 10f;
+                if (temp < DELTA_MIN_TEMP_C) continue;
+                biomeFlat[idx] = temp >= DELTA_MANGROVE_TEMP_C
+                        ? BiomeClassifier.MANGROVE_SWAMP : BiomeClassifier.SWAMP;
+            }
+        }
+    }
+
+    private static boolean deltaReplaceable(short biome) {
+        if (biome == BiomeClassifier.RIVER || biome == BiomeClassifier.FROZEN_RIVER
+                || biome == BiomeClassifier.SWAMP || biome == BiomeClassifier.MANGROVE_SWAMP) {
+            return false;
+        }
+        // Everything on the flats can silt over, beaches included; the sea keeps its ids.
+        return biome < 41 || biome > 49;
+    }
+
+    /** Swamp ring where warm, wet lowland meets a lake near its own level. */
+    private static void stampLakeFringes(List<RiverRegions.Region> regions, float[] elev,
+                                         short[] biomeFlat, float[] climate, float[] waterFlat,
+                                         int i1, int j1, int height, int width,
+                                         float metresPerBlock, float freeboardMetres, int scale) {
+        int n = height * width;
+        // Needs both the leading temperature block and the precip block two channels in.
+        if (climate == null || climate.length < 3 * n) return;
+
+        float maxRise = LAKE_FRINGE_MAX_RISE_BLOCKS * metresPerBlock;
+        for (RiverRegions.Region region : regions) {
+            for (int k = 0; k < region.lakeSurface.length; k++) {
+                // Same level derivation as stampLakes, so the ring sits on its waterline.
+                float spill = region.lakeSurface[k];
+                float level = spill - freeboardMetres;
+                if (level <= 0f) level = spill - 0.35f * metresPerBlock;
+                if (level <= 0f) continue;
+
+                int bx = region.lakeBlockX[k], bz = region.lakeBlockZ[k];
+                float ring = LAKE_FRINGE_BASE_BLOCKS
+                        + LAKE_FRINGE_WOBBLE_BLOCKS * GREEN_NOISE.GetNoise(bx, bz);
+                int R = (int) Math.ceil(ring);
+
+                for (int dz = -R; dz < scale + R; dz++) {
+                    int row = bz + dz - i1;
+                    if (row < 0 || row >= height) continue;
+                    for (int dx = -R; dx < scale + R; dx++) {
+                        int col = bx + dx - j1;
+                        if (col < 0 || col >= width) continue;
+                        int idx = row * width + col;
+                        if (waterFlat[idx] != Float.NEGATIVE_INFINITY) continue;
+                        float rise = elev[idx] - level;
+                        if (rise < 0f || rise > maxRise) continue;
+                        if (climate[idx] < LAKE_FRINGE_MIN_TEMP_C) continue;
+                        if (climate[2 * n + idx] < LAKE_FRINGE_MIN_PRECIP_MM) continue;
+                        if (!fringeReplaceable(biomeFlat[idx])) continue;
+                        biomeFlat[idx] = BiomeClassifier.SWAMP;
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean fringeReplaceable(short biome) {
+        switch (biome) {
+            case BiomeClassifier.PLAINS:
+            case BiomeClassifier.FOREST:
+            case BiomeClassifier.FOREST_SPARSE:
+            case BiomeClassifier.BIRCH_FOREST:
+            case BiomeClassifier.DARK_FOREST:
+            case BiomeClassifier.MEADOW:
+            case BiomeClassifier.JUNGLE:
+            case BiomeClassifier.SPARSE_JUNGLE:
+            case BiomeClassifier.SAVANNA:
+                return true;
+            default:
+                return false;
         }
     }
 

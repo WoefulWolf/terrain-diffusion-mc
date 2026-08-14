@@ -411,7 +411,8 @@ public final class ExplorerServer {
 
         java.util.List<RiverRegions.Region> regions = RiverRegions.forBlockWindow(
                 i0 * scale, j0 * scale, (i0 + H) * scale, (j0 + W) * scale,
-                scale, size, (a, b, c, d) -> LocalTerrainProvider.getPipelineData(a, b, c, d, true));
+                scale, size, WorldScaleManager.getRiverParameters(),
+                (a, b, c, d) -> LocalTerrainProvider.getPipelineData(a, b, c, d, true));
 
         for (RiverRegions.Region region : regions) {
             for (int k = 0; k < region.lakeSurface.length; k++) {

@@ -4,6 +4,7 @@ import com.github.xandergos.terraindiffusionmc.infinitetensor.FloatTensor;
 import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverCarver;
 import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverRegions;
 import com.github.xandergos.terraindiffusionmc.world.RiverMode;
+import com.github.xandergos.terraindiffusionmc.world.RiverParameters;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -424,36 +425,26 @@ public final class LocalTerrainProvider {
      * Channel size against catchment. Depth keeps a weak power, as in nature, so a big river
      * is far wider than it is deep.
      *
-     * <p>The reference is the headwater catchment where tracing stops, so a river starts as
-     * a one-block spring. Flow spans roughly 250-fold from there to a major trunk, which is
-     * why the exponents sit near real hydraulic geometry: the width cap lands around a
-     * 150000-cell catchment, and a river spends thousands of blocks getting there instead
-     * of arriving fully sized a bend after its source.
+     * <p>The width reference is the world's headwater catchment, where tracing stops, so a
+     * river starts as a one-block spring. Flow spans roughly 250-fold from there to a major
+     * trunk, which is why the exponents sit near real hydraulic geometry: the width cap
+     * lands deep into trunk territory, and a river spends thousands of blocks getting
+     * there instead of arriving fully sized a bend after its source. The caps and the
+     * reference come from {@link RiverParameters}, chosen per world.
      */
-    private static final float RIVER_WIDTH_REFERENCE_CELLS = 600f;
     private static final float RIVER_WIDTH_AT_REFERENCE = 0.5f;
-    private static final float RIVER_WIDTH_EXPONENT = 0.7f;
-    private static final float RIVER_MAX_HALF_WIDTH = 25f;
     private static final float RIVER_DEPTH_AT_SOURCE = 1.4f;
     private static final float RIVER_DEPTH_EXPONENT = 0.28f;
-    private static final float RIVER_MAX_DEPTH_BLOCKS = 10f;
-    /** Blocks of bank above the waterline. Enough to hold the river in without a levee. */
-    private static final float RIVER_FREEBOARD_BLOCKS = 1.0f;
-    /**
-     * Blocks of water a lake holds even where its basin is naturally shallower. Measured
-     * basins here run 2 to 20 m deep, under a single block at scale 2, so an uncarved lake
-     * would render as scattered puddles. Deepening the bed is what makes it read as water.
-     */
-    private static final float LAKE_MIN_WATER_BLOCKS = 2f;
 
     /**
      * Display width of a channel for the explorer, matching the carve's base curve before
      * gradient modulation. Lives beside the constants it mirrors so they cannot drift.
      */
     public static float baseRiverHalfWidthBlocks(float flow) {
-        float catchment = Math.max(1f, flow / RIVER_WIDTH_REFERENCE_CELLS);
-        return Math.min(RIVER_MAX_HALF_WIDTH,
-                RIVER_WIDTH_AT_REFERENCE * (float) Math.pow(catchment, RIVER_WIDTH_EXPONENT));
+        RiverParameters params = WorldScaleManager.getRiverParameters();
+        float catchment = Math.max(1f, flow / params.headwaterCells);
+        return Math.min(params.maxHalfWidth(),
+                RIVER_WIDTH_AT_REFERENCE * (float) Math.pow(catchment, params.widthExponent));
     }
 
     /**
@@ -492,10 +483,10 @@ public final class LocalTerrainProvider {
     private static final int MOUTH_TAPER_MAX_BLOCKS = 96;
     /**
      * Depth a river shallows to across its mouth. The fade alone cannot soften a mouth:
-     * blending toward untouched ground is linear in fade while the bed sits up to ten
-     * blocks down, so most of the taper still cuts near-full depth and the trench ends in
-     * an underwater cliff. Rivers shoal over their own bars; the depth has to come up
-     * before the fade can feather what is left into the shelf.
+     * blending toward untouched ground is linear in fade while the bed sits many blocks
+     * down, so most of the taper still cuts near-full depth and the trench ends in an
+     * underwater cliff. Rivers shoal over their own bars; the depth has to come up before
+     * the fade can feather what is left into the shelf.
      */
     private static final float MOUTH_DEPTH_BLOCKS = 2.5f;
 
@@ -509,12 +500,12 @@ public final class LocalTerrainProvider {
     private static final int SOURCE_FADE_MAX_BLOCKS = 96;
 
     /**
-     * Depth grading where a river meets a lake. A lake floor sits two blocks under its
-     * surface while a big river runs ten deep; unblended, the bed would leap the whole
-     * difference at the shoreline as an underwater cliff, with the last dry discs punched
-     * into the shallow pan as deep round holes. Instead the river shallows on approach,
-     * pushes a fading scour trench into the basin like a real mouth, and mid-lake the
-     * carve settles exactly onto the stamped floor and disappears.
+     * Depth grading where a river meets a lake. A lake floor sits a couple of blocks under
+     * its surface while a big river runs far deeper; unblended, the bed would leap the
+     * whole difference at the shoreline as an underwater cliff, with the last dry discs
+     * punched into the shallow pan as deep round holes. Instead the river shallows on
+     * approach, pushes a fading scour trench into the basin like a real mouth, and
+     * mid-lake the carve settles exactly onto the stamped floor and disappears.
      */
     private static final float RIVER_LAKE_TRANSITION_BLOCKS = 32f;
     private static final float LAKE_ENTRY_SCOUR_BLOCKS = 2.5f;
@@ -540,11 +531,14 @@ public final class LocalTerrainProvider {
 
         RiverRegions.Size regionSize = mode == RiverMode.FAST
                 ? RiverRegions.Size.SMALL : RiverRegions.Size.LARGE;
+        RiverParameters params = WorldScaleManager.getRiverParameters();
+        float maxHalfWidth = params.maxHalfWidth();
+        float maxDepth = params.maxDepthBlocks;
 
         List<RiverRegions.Region> regions;
         try {
             regions = RiverRegions.forBlockWindow(i1, j1, i1 + height, j1 + width, scale,
-                    regionSize, (a, b, c, d) -> pipeline.get(a, b, c, d, true));
+                    regionSize, params, (a, b, c, d) -> pipeline.get(a, b, c, d, true));
         } catch (Exception e) {
             LOG.warn("River paths unavailable for tile ({}, {}): {}", j1, i1, e.toString());
             return;
@@ -563,14 +557,14 @@ public final class LocalTerrainProvider {
                 edgeField[row * width + col] = EDGE_NOISE.GetNoise(j1 + col, i1 + row);
             }
         }
-        float freeboardMetres = RIVER_FREEBOARD_BLOCKS * metresPerBlock;
+        float freeboardMetres = params.freeboardBlocks * metresPerBlock;
 
         // Water claims are first-wins and stamped largest first: lakes, then rivers by
         // mouth size. A tributary reaching a bigger river finds those cells already wet
         // at the lower surface, so its own water stops at the join and steps down like a
         // little waterfall, instead of riding out over the river on its higher surface.
         stampLakes(regions, elev, waterFlat, riverClassFlat, i1, j1, height, width,
-                metresPerBlock, freeboardMetres, scale);
+                metresPerBlock, freeboardMetres, params.lakeDepthBlocks, scale);
 
         List<RiverRegions.RiverPath> paths = new ArrayList<>();
         for (RiverRegions.Region region : regions) paths.addAll(region.paths);
@@ -590,15 +584,15 @@ public final class LocalTerrainProvider {
             float[] pDepth = new float[len];
             float[] pSteep = new float[len];
             for (int k = 0; k < len; k++) {
-                float catchment = Math.max(1f, path.flow[k] / RIVER_WIDTH_REFERENCE_CELLS);
+                float catchment = Math.max(1f, path.flow[k] / params.headwaterCells);
                 float gradient = gradientAt(path, k) / metresPerBlock;
                 float steep = clamp01(gradient / RIVER_STEEP_GRADIENT);
 
                 pSteep[k] = steep;
-                pHalf[k] = Math.min(RIVER_MAX_HALF_WIDTH,
-                        RIVER_WIDTH_AT_REFERENCE * (float) Math.pow(catchment, RIVER_WIDTH_EXPONENT)
+                pHalf[k] = Math.min(maxHalfWidth,
+                        RIVER_WIDTH_AT_REFERENCE * (float) Math.pow(catchment, params.widthExponent)
                                 * lerp(RIVER_WIDTH_WHEN_SLACK, RIVER_WIDTH_WHEN_STEEP, steep));
-                pDepth[k] = Math.min(RIVER_MAX_DEPTH_BLOCKS,
+                pDepth[k] = Math.min(maxDepth,
                         RIVER_DEPTH_AT_SOURCE * (float) Math.pow(catchment, RIVER_DEPTH_EXPONENT)
                                 * lerp(RIVER_DEPTH_WHEN_SLACK, RIVER_DEPTH_WHEN_STEEP, steep));
             }
@@ -610,7 +604,7 @@ public final class LocalTerrainProvider {
                 for (int k = len - taper; k < len; k++) {
                     float p = (k - (len - taper)) / (float) Math.max(1, taper - 1);
                     pFade[k] = 1f - p;
-                    pHalf[k] = Math.min(RIVER_MAX_HALF_WIDTH * 2f,
+                    pHalf[k] = Math.min(maxHalfWidth * 2f,
                             pHalf[k] * (1f + MOUTH_FAN_WIDEN * p));
                     float shoal = Math.min(pDepth[k], MOUTH_DEPTH_BLOCKS);
                     pDepth[k] = pDepth[k] + (shoal - pDepth[k]) * p;
@@ -640,12 +634,12 @@ public final class LocalTerrainProvider {
             for (int k = 0; k < len; k++) {
                 // The scour scales with the river, so a brook slips into a pond unchanged
                 // while a major river pushes a real trench through the shore.
-                float boundaryDepth = LAKE_MIN_WATER_BLOCKS
+                float boundaryDepth = params.lakeDepthBlocks
                         + Math.min(LAKE_ENTRY_SCOUR_BLOCKS, 0.4f * pDepth[k]);
                 if (path.submerged[k]) {
                     float scour = clamp01(1f - dDry[k] / LAKE_ENTRY_SCOUR_LEN_BLOCKS);
-                    pDepth[k] = LAKE_MIN_WATER_BLOCKS
-                            + (boundaryDepth - LAKE_MIN_WATER_BLOCKS) * scour;
+                    pDepth[k] = params.lakeDepthBlocks
+                            + (boundaryDepth - params.lakeDepthBlocks) * scour;
                 } else if (dWet[k] < RIVER_LAKE_TRANSITION_BLOCKS) {
                     float t = dWet[k] / RIVER_LAKE_TRANSITION_BLOCKS;
                     pDepth[k] = boundaryDepth + (pDepth[k] - boundaryDepth) * t;
@@ -697,19 +691,20 @@ public final class LocalTerrainProvider {
                 } else if (count > 0) {
                     // A path may leave and re-enter, so carve each run as it closes.
                     carveRun(elev, biomeFlat, temperature, waterFlat, claimDist, riverClassFlat,
-                            edgeField, height, width, localPath, runHalf, runDepth, runSurf,
-                            runSteep, runFade, metresPerBlock, count);
+                            edgeField, params, height, width, localPath, runHalf, runDepth,
+                            runSurf, runSteep, runFade, metresPerBlock, count);
                     count = 0;
                 }
             }
             if (count > 0) {
                 carveRun(elev, biomeFlat, temperature, waterFlat, claimDist, riverClassFlat,
-                        edgeField, height, width, localPath, runHalf, runDepth, runSurf,
-                        runSteep, runFade, metresPerBlock, count);
+                        edgeField, params, height, width, localPath, runHalf, runDepth,
+                        runSurf, runSteep, runFade, metresPerBlock, count);
             }
         }
 
-        featherBeds(elev, waterFlat, i1, j1, height, width, metresPerBlock);
+        featherBeds(elev, waterFlat, i1, j1, height, width, metresPerBlock,
+                params.bedReliefBlocks);
     }
 
     /**
@@ -722,7 +717,8 @@ public final class LocalTerrainProvider {
     private static void stampLakes(List<RiverRegions.Region> regions, float[] elev,
                                    float[] waterFlat, byte[] riverClassFlat,
                                    int i1, int j1, int height, int width,
-                                   float metresPerBlock, float freeboardMetres, int scale) {
+                                   float metresPerBlock, float freeboardMetres,
+                                   float lakeDepthBlocks, int scale) {
         for (RiverRegions.Region region : regions) {
             for (int k = 0; k < region.lakeSurface.length; k++) {
                 float spill = region.lakeSurface[k];
@@ -731,7 +727,7 @@ public final class LocalTerrainProvider {
                 // the water just below its rim rather than leaving a dry pan.
                 if (level <= 0f) level = spill - 0.35f * metresPerBlock;
                 if (level <= 0f) continue;
-                float bedCap = level - LAKE_MIN_WATER_BLOCKS * metresPerBlock;
+                float bedCap = level - lakeDepthBlocks * metresPerBlock;
                 for (int dz = 0; dz < scale; dz++) {
                     int row = region.lakeBlockZ[k] + dz - i1;
                     if (row < 0 || row >= height) continue;
@@ -784,15 +780,14 @@ public final class LocalTerrainProvider {
      * block under the water surface so the feathering can never break the waterline.
      */
     private static final FastNoiseLite BED_NOISE = makeFnl(0x52BED, 0.05f, 3, 2f, 0.5f);
-    private static final float BED_NOISE_BLOCKS = 1.4f;
     /** Waterline wobble, sampled at world coordinates so every tile draws the same edge. */
     private static final FastNoiseLite EDGE_NOISE = makeFnl(0x51DE5, 0.08f, 2, 2f, 0.5f);
 
     private static void featherBeds(float[] elev, float[] waterFlat,
                                     int i1, int j1, int height, int width,
-                                    float metresPerBlock) {
+                                    float metresPerBlock, float reliefBlocks) {
         if (waterFlat == null) return;
-        float amp = BED_NOISE_BLOCKS * metresPerBlock;
+        float amp = reliefBlocks * metresPerBlock;
         float clearance = 0.5f * metresPerBlock;
         for (int row = 0; row < height; row++) {
             for (int col = 0; col < width; col++) {
@@ -852,7 +847,7 @@ public final class LocalTerrainProvider {
 
     private static void carveRun(float[] elev, short[] biomeFlat, float[] temperature,
                                  float[] waterFlat, float[] claimDist, byte[] riverClassFlat,
-                                 float[] edgeField, int height, int width,
+                                 float[] edgeField, RiverParameters params, int height, int width,
                                  int[] buffer, float[] halfWidths, float[] depths,
                                  float[] surfaces, float[] steeps, float[] fades,
                                  float metresPerBlock, int count) {
@@ -862,7 +857,7 @@ public final class LocalTerrainProvider {
                 Arrays.copyOf(buffer, count), Arrays.copyOf(halfWidths, count),
                 Arrays.copyOf(depths, count), Arrays.copyOf(surfaces, count),
                 Arrays.copyOf(steeps, count), Arrays.copyOf(fades, count), edgeField,
-                RIVER_FREEBOARD_BLOCKS, metresPerBlock,
+                params.freeboardBlocks, params.edgeWobbleBlocks, metresPerBlock,
                 BiomeClassifier.RIVER, BiomeClassifier.FROZEN_RIVER);
     }
 

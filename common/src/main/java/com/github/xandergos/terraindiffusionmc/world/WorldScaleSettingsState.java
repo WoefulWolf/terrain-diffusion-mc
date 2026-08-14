@@ -21,24 +21,56 @@ public final class WorldScaleSettingsState extends SavedData {
                     .forGetter(WorldScaleSettingsState::hasExplicitScale),
             // Optional so worlds saved before rivers existed still load.
             Codec.STRING.optionalFieldOf("river_mode", RiverMode.DEFAULT.id())
-                    .forGetter(state -> state.riverMode.id())
+                    .forGetter(state -> state.riverMode.id()),
+            RiverParametersCodec.CODEC.optionalFieldOf("river_parameters", RiverParameters.DEFAULT)
+                    .forGetter(state -> state.riverParameters)
     ).apply(instance, WorldScaleSettingsState::new));
+
+    /** Nested codec so the settings record stays within the builder's field limit. */
+    private static final class RiverParametersCodec {
+        static final Codec<RiverParameters> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.INT.optionalFieldOf("main_cells", RiverParameters.DEFAULT_MAIN_CHANNEL_CELLS)
+                        .forGetter(p -> p.mainChannelCells),
+                Codec.INT.optionalFieldOf("headwater_cells", RiverParameters.DEFAULT_HEADWATER_CELLS)
+                        .forGetter(p -> p.headwaterCells),
+                Codec.INT.optionalFieldOf("max_width", RiverParameters.DEFAULT_MAX_WIDTH_BLOCKS)
+                        .forGetter(p -> p.maxWidthBlocks),
+                Codec.INT.optionalFieldOf("max_depth", RiverParameters.DEFAULT_MAX_DEPTH_BLOCKS)
+                        .forGetter(p -> p.maxDepthBlocks),
+                Codec.FLOAT.optionalFieldOf("width_exponent", RiverParameters.DEFAULT_WIDTH_EXPONENT)
+                        .forGetter(p -> p.widthExponent),
+                Codec.FLOAT.optionalFieldOf("freeboard", RiverParameters.DEFAULT_FREEBOARD_BLOCKS)
+                        .forGetter(p -> p.freeboardBlocks),
+                Codec.INT.optionalFieldOf("lake_min_cells", RiverParameters.DEFAULT_LAKE_MIN_CELLS)
+                        .forGetter(p -> p.lakeMinCells),
+                Codec.FLOAT.optionalFieldOf("lake_depth", RiverParameters.DEFAULT_LAKE_DEPTH_BLOCKS)
+                        .forGetter(p -> p.lakeDepthBlocks),
+                Codec.FLOAT.optionalFieldOf("edge_wobble", RiverParameters.DEFAULT_EDGE_WOBBLE_BLOCKS)
+                        .forGetter(p -> p.edgeWobbleBlocks),
+                Codec.FLOAT.optionalFieldOf("bed_relief", RiverParameters.DEFAULT_BED_RELIEF_BLOCKS)
+                        .forGetter(p -> p.bedReliefBlocks)
+        ).apply(instance, RiverParameters::new));
+    }
 
     private int scale;
     private boolean explicitScale;
     private RiverMode riverMode;
+    private RiverParameters riverParameters;
 
     /**
      * Creates a default state for worlds that do not yet have saved terrain diffusion settings.
      */
-    private WorldScaleSettingsState(int configuredScale, boolean hasExplicitScale, String riverModeId) {
+    private WorldScaleSettingsState(int configuredScale, boolean hasExplicitScale, String riverModeId,
+                                    RiverParameters riverParameters) {
         this.scale = WorldScaleManager.clampScale(configuredScale);
         this.explicitScale = hasExplicitScale;
         this.riverMode = RiverMode.byId(riverModeId);
+        this.riverParameters = riverParameters;
     }
 
     public static WorldScaleSettingsState createDefault() {
-        return new WorldScaleSettingsState(WorldScaleManager.DEFAULT_SCALE, false, RiverMode.DEFAULT.id());
+        return new WorldScaleSettingsState(WorldScaleManager.DEFAULT_SCALE, false, RiverMode.DEFAULT.id(),
+                RiverParameters.DEFAULT);
     }
 
     public RiverMode getRiverMode() {
@@ -47,6 +79,15 @@ public final class WorldScaleSettingsState extends SavedData {
 
     public void setRiverMode(RiverMode mode) {
         this.riverMode = mode;
+        setDirty();
+    }
+
+    public RiverParameters getRiverParameters() {
+        return riverParameters;
+    }
+
+    public void setRiverParameters(RiverParameters parameters) {
+        this.riverParameters = parameters;
         setDirty();
     }
 

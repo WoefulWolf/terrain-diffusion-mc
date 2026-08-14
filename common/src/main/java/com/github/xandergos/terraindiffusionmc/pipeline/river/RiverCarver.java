@@ -24,9 +24,9 @@ public final class RiverCarver {
      * Edge wobble scaling. A channel is a union of discs along the path, and its envelope
      * is a chain of arcs that reads as brush stamps once the discs are large. Pushing the
      * distance test in and out per cell turns the waterline into an organic contour. The
-     * push grows with the channel and vanishes toward brook size, so springs stay crisp.
+     * push grows with the channel and vanishes toward brook size, so springs stay crisp;
+     * its full strength comes from the caller as a per-world choice.
      */
-    private static final float EDGE_WOBBLE_MAX_BLOCKS = 5f;
     private static final float EDGE_WOBBLE_FULL_RADIUS = 12f;
     /**
      * Blocks a cell must sit below the water surface to count as wetted. Without a floor,
@@ -72,6 +72,7 @@ public final class RiverCarver {
      *                      for plain circular edges; a cell's value is fixed, so every disc
      *                      overlapping it agrees on where the edge sits
      * @param freeboard     blocks of bank standing above the water surface
+     * @param edgeWobbleMax blocks the waterline may wobble in and out at full channel size
      * @param metresPerBlock vertical scale, so depths in blocks meet elevations in metres
      */
     public static void carveChannel(float[] elev, short[] biomeIds, float[] temperature,
@@ -79,7 +80,7 @@ public final class RiverCarver {
                                     int height, int width, int[] path,
                                     float[] halfWidths, float[] depths, float[] surfaces,
                                     float[] steeps, float[] fades, float[] edgeWobble,
-                                    float freeboard, float metresPerBlock,
+                                    float freeboard, float edgeWobbleMax, float metresPerBlock,
                                     short riverId, short frozenRiverId) {
         if (path == null || path.length == 0) return;
         float wetCut = WET_MIN_DEPTH_BLOCKS * metresPerBlock;
@@ -101,7 +102,7 @@ public final class RiverCarver {
             // a deep river gets a wider cut at the same slope.
             float bank = Math.max(1f, Math.min(MAX_BANK_CELLS, (depth + freeboard) / BANK_SLOPE));
             float wobbleAmp = edgeWobble == null ? 0f
-                    : Math.min(1f, radius / EDGE_WOBBLE_FULL_RADIUS) * EDGE_WOBBLE_MAX_BLOCKS;
+                    : Math.min(1f, radius / EDGE_WOBBLE_FULL_RADIUS) * edgeWobbleMax;
             int reach = (int) Math.ceil(radius + bank + wobbleAmp);
 
             int r0 = cell / width;

@@ -1,5 +1,6 @@
 package com.github.xandergos.terraindiffusionmc.pipeline.river;
 
+import com.github.xandergos.terraindiffusionmc.world.RiverParameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,23 +46,12 @@ public final class RiverRegions {
         }
     }
 
-    /**
-     * Catchment a channel must reach somewhere along its run to count as a river at all.
-     * This is the strongest control on how many rivers there are: at 30 m cells, 15000 is
-     * about 13.5 km2, so a river has to be a real drainage system, not a hillside brook.
-     */
-    private static final float MAIN_CHANNEL_CELLS = 20000f;
-    /**
-     * Catchment down to which a qualifying river's main stem is traced back upstream, at
-     * the reference elevation and rainfall. This sets where rivers begin; the factors
-     * below then move the springs by terrain.
-     *
-     * <p>High wet mountains trace to a quarter of this, so sources climb far up the
-     * ranges. Low or dry ground raises the floor steeply, so a channel crossing a plain
-     * or a savanna must already be a real river: it flows through such country without
-     * appearing to begin in it.
-     */
-    private static final float HEADWATER_MIN_CELLS = 600f;
+    // The channel-forming and headwater catchments live in RiverParameters, chosen per
+    // world at creation; everything here reads them from the params argument. The spring
+    // factors below then move the sources by terrain: high wet mountains trace to a
+    // fraction of the headwater catchment, while low or dry ground raises the floor so a
+    // channel crossing a plain or a savanna flows through without appearing to begin there.
+
     /** Below this elevation in metres the lowland factor applies in full. */
     private static final float SPRING_LOW_ELEVATION_M = 150f;
     /** Above this elevation the mountain factor applies in full. */
@@ -85,12 +75,6 @@ public final class RiverRegions {
     private static final float SPRING_RELIEF_NONE_M = 25f;
     private static final float SPRING_RELIEF_FULL_M = 90f;
     /**
-     * Qualifying catchment for channels fed from across the window border, whose measured
-     * discharge is only a lower bound of the truth. Held at the full bar, a river maturing
-     * in the neighbouring window is dropped by the window that owns its mouth.
-     */
-    private static final float EDGE_FED_CHANNEL_CELLS = 5000f;
-    /**
      * Paths shorter than this that neither join another river nor reach the sea are window
      * fragments, and would read as a noodle starting and ending nowhere.
      */
@@ -104,12 +88,6 @@ public final class RiverRegions {
      * does, by draining a huge area or wet mountains upstream.
      */
     private static final float REFERENCE_PRECIP = 600f;
-    /**
-     * At 30 m a cell is small enough that heightmap noise ponds constantly, so a lake must
-     * cover real area. Depth deliberately is not a gate: measured basins on this terrain
-     * run 2 to 20 m deep, so lakes are made by area and the bed is deepened at carve time.
-     */
-    private static final int MIN_LAKE_CELLS = 250;
     /**
      * Guards against a pathological walk consuming the region, set far above any real
      * path. A truncated walk does not merely stop, it orphans its entire downstream:
@@ -191,7 +169,8 @@ public final class RiverRegions {
      * @param scale blocks per native pixel
      */
     public static List<Region> forBlockWindow(int i0, int j0, int i1, int j1,
-                                              int scale, Size size, FineSource source) {
+                                              int scale, Size size, RiverParameters params,
+                                              FineSource source) {
         int regionBlocks = size.side * scale;
         // A neighbour's paths run up to a halo past its core, so border tiles must ask the
         // neighbours too. Without this a river is cut off at the core line of the region
@@ -203,13 +182,14 @@ public final class RiverRegions {
         List<Region> out = new ArrayList<>();
         for (int ri = ri0; ri <= ri1; ri++) {
             for (int rj = rj0; rj <= rj1; rj++) {
-                out.add(region(ri, rj, scale, size, source));
+                out.add(region(ri, rj, scale, size, params, source));
             }
         }
         return out;
     }
 
-    private static Region region(int ri, int rj, int scale, Size size, FineSource source) {
+    private static Region region(int ri, int rj, int scale, Size size, RiverParameters params,
+                                 FineSource source) {
         // Region grids of different sizes must not share cache entries.
         long key = ((long) ri << 33) ^ ((long) rj << 1) ^ size.ordinal();
         Region cached = CACHE.get(key);
@@ -217,7 +197,7 @@ public final class RiverRegions {
 
         Region built;
         try {
-            built = build(ri, rj, scale, size, source);
+            built = build(ri, rj, scale, size, params, source);
             LOG.info("River region ({}, {}) {}: {} paths, {} lake cells",
                     ri, rj, size, built.paths.size(), built.lakeSurface.length);
         } catch (Exception e) {
@@ -230,8 +210,8 @@ public final class RiverRegions {
         return CACHE.get(key);
     }
 
-    private static Region build(int ri, int rj, int scale, Size size, FineSource source)
-            throws Exception {
+    private static Region build(int ri, int rj, int scale, Size size, RiverParameters params,
+                                FineSource source) throws Exception {
         int i0 = ri * size.side - size.halo;
         int j0 = rj * size.side - size.halo;
         int i1 = ri * size.side + size.side + size.halo;
@@ -246,8 +226,10 @@ public final class RiverRegions {
         float[] temperature = (climate != null && climate.length >= n)
                 ? java.util.Arrays.copyOfRange(climate, 0, n) : null;
 
+        // Depth is deliberately not a lake gate: basins on this terrain run only metres
+        // deep, so lakes are made by area and the bed is deepened at carve time.
         CoarseHydrology.Drainage d =
-                CoarseHydrology.analyse(elev, precip, h, w, MIN_LAKE_CELLS);
+                CoarseHydrology.analyse(elev, precip, h, w, params.lakeMinCells);
 
         boolean hasLand = false;
         for (int i = 0; i < n && !hasLand; i++) hasLand = !d.ocean[i];
@@ -283,11 +265,11 @@ public final class RiverRegions {
             float wetness = precip == null ? 1f
                     : Math.min(1f, Math.max(SPRING_MIN_WETNESS,
                             Math.max(0f, precip[i]) / REFERENCE_PRECIP));
-            headwaterMin[i] = HEADWATER_MIN_CELLS * norm * elevFactor / wetness;
+            headwaterMin[i] = params.headwaterCells * norm * elevFactor / wetness;
         }
 
         List<RiverNetwork.Reach> reaches = RiverNetwork.extractMainRivers(d,
-                MAIN_CHANNEL_CELLS * norm, EDGE_FED_CHANNEL_CELLS * norm, headwaterMin);
+                params.mainChannelCells * norm, params.edgeFedCells() * norm, headwaterMin);
         List<RiverPath> paths = List.of();
         if (!reaches.isEmpty()) {
             boolean[] kept = new boolean[n];

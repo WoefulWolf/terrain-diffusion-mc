@@ -12,6 +12,7 @@ public final class WorldScaleManager {
 
     private static volatile int currentScale = DEFAULT_SCALE;
     private static volatile RiverMode currentRiverMode = RiverMode.DEFAULT;
+    private static volatile RiverParameters currentRiverParameters = RiverParameters.DEFAULT;
 
     private WorldScaleManager() {
     }
@@ -35,15 +36,25 @@ public final class WorldScaleManager {
             // picked at creation and later worlds cannot inherit a stale selection.
             RiverMode pendingRivers = WorldScaleSelectionState.consumePendingRiverMode();
             if (pendingRivers != null) worldScaleSettingsState.setRiverMode(pendingRivers);
+            RiverParameters pendingParameters = WorldScaleSelectionState.consumePendingRiverParameters();
+            if (pendingParameters != null) worldScaleSettingsState.setRiverParameters(pendingParameters);
         }
 
         currentScale = clampScale(worldScaleSettingsState.getScale());
         currentRiverMode = worldScaleSettingsState.getRiverMode();
+        currentRiverParameters = worldScaleSettingsState.getRiverParameters();
+        // Cached regions were analysed under the previous world's parameters.
+        com.github.xandergos.terraindiffusionmc.pipeline.river.RiverRegions.clear();
     }
 
     /** Returns the river mode active for the loaded world. */
     public static RiverMode getRiverMode() {
         return currentRiverMode;
+    }
+
+    /** Returns the river generation parameters active for the loaded world. */
+    public static RiverParameters getRiverParameters() {
+        return currentRiverParameters;
     }
 
     /** Updates river mode for the currently loaded world and persists it immediately. */

@@ -37,6 +37,25 @@ public final class WorldScaleSelectionState {
         return pendingScale != null ? pendingScale : WorldScaleManager.DEFAULT_SCALE;
     }
 
+    private static final AtomicReference<RiverParameters> PENDING_RIVER_PARAMETERS =
+            new AtomicReference<>();
+
+    /** Stores pending river parameters selected in world creation UI. */
+    public static void setPendingRiverParameters(RiverParameters parameters) {
+        PENDING_RIVER_PARAMETERS.set(parameters);
+    }
+
+    /** Returns and clears the pending river parameters, if any. */
+    public static RiverParameters consumePendingRiverParameters() {
+        return PENDING_RIVER_PARAMETERS.getAndSet(null);
+    }
+
+    /** Returns the pending river parameters, or the defaults if none are set. */
+    public static RiverParameters getPendingRiverParametersOrDefault() {
+        RiverParameters parameters = PENDING_RIVER_PARAMETERS.get();
+        return parameters != null ? parameters : RiverParameters.DEFAULT;
+    }
+
     /** Stores a pending river mode selected in world creation UI. */
     public static void setPendingRiverMode(RiverMode mode) {
         PENDING_RIVER_MODE.set(mode);

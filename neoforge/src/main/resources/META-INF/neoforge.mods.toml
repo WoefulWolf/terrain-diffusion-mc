@@ -11,6 +11,7 @@ displayName="${mod_name}"
 authors="${mod_author}"
 credits="${credits}"
 description='''${description}'''
+logoFile="${mod_icon}"
 
 [[mixins]]
 config="${mod_id}.mixins.json"

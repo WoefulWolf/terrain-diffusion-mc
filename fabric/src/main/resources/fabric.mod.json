@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "id": "terrain-diffusion-mc",
+  "id": "${mod_id}",
   "version": "${version}",
-  "name": "terrain-diffusion-mc",
-  "description": "Terrain Diffusion in Minecraft",
-  "authors": [],
+  "name": "${mod_name}",
+  "description": "${description}",
+  "authors": ["${mod_author}"],
   "contact": {},
-  "license": "MIT",
-  "icon": "assets/terrain-diffusion-mc/icon.png",
+  "license": "${license}",
+  "icon": "${mod_icon}",
   "environment": "*",
   "entrypoints": {
     "fabric-datagen": [

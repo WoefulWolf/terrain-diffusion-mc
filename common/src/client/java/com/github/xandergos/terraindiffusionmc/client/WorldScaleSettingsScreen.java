@@ -1,5 +1,6 @@
 package com.github.xandergos.terraindiffusionmc.client;
 
+import com.github.xandergos.terraindiffusionmc.world.RiverMode;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleManager;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleSelectionState;
 import net.minecraft.ChatFormatting;
@@ -8,25 +9,13 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen;
-import net.minecraft.core.Holder;
-import net.minecraft.core.HolderGetter;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.world.level.dimension.DimensionType;
-import net.minecraft.world.level.dimension.LevelStem;
-import net.minecraft.world.level.levelgen.WorldDimensions;
-
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * World creation settings screen for selecting the initial terrain scale of a world.
  */
 public final class WorldScaleSettingsScreen extends Screen {
-    private static final String MOD_ID = "terrain-diffusion-mc";
     private static final int TEXT_FIELD_WIDTH = 80;
     private static final int TEXT_FIELD_HEIGHT = 20;
     private static final int BUTTON_WIDTH = 80;
@@ -37,9 +26,14 @@ public final class WorldScaleSettingsScreen extends Screen {
     private static final Component ERROR_TEXT = Component.literal("Scale must be an integer between 1 and 6")
             .withStyle(ChatFormatting.RED);
 
+    private static final Component RIVER_LABEL_TEXT = Component.literal("Rivers");
+
     private final Screen parentScreen;
     private EditBox scaleTextField;
     private StringWidget validationTextWidget;
+    private StringWidget riverDescriptionWidget;
+    private Button riverModeButton;
+    private RiverMode riverMode = RiverMode.DEFAULT;
 
     public WorldScaleSettingsScreen(Screen parentScreen) {
         super(Component.translatable("terrain-diffusion-mc.world_settings.title"));
@@ -53,11 +47,11 @@ public final class WorldScaleSettingsScreen extends Screen {
 
         addCenteredTextWidget(this.title, centerX, 20, 0xFFFFFF);
 
-        addCenteredTextWidget(DESCRIPTION_TEXT, centerX, centerY - 34, 0xAAAAAA);
-        addCenteredTextWidget(LABEL_TEXT, centerX, centerY - 22, 0xFFFFFF);
+        addCenteredTextWidget(DESCRIPTION_TEXT, centerX, centerY - 62, 0xAAAAAA);
+        addCenteredTextWidget(LABEL_TEXT, centerX, centerY - 50, 0xFFFFFF);
 
         scaleTextField = new EditBox(this.font,
-                centerX - TEXT_FIELD_WIDTH / 2, centerY - 10,
+                centerX - TEXT_FIELD_WIDTH / 2, centerY - 38,
                 TEXT_FIELD_WIDTH, TEXT_FIELD_HEIGHT,
                 LABEL_TEXT);
         scaleTextField.setValue(String.valueOf(WorldScaleSelectionState.getPendingScaleOrDefault()));
@@ -65,15 +59,50 @@ public final class WorldScaleSettingsScreen extends Screen {
         this.addRenderableWidget(scaleTextField);
         this.setInitialFocus(scaleTextField);
 
+        addCenteredTextWidget(RIVER_LABEL_TEXT, centerX, centerY - 8, 0xFFFFFF);
+
+        riverMode = WorldScaleSelectionState.getPendingRiverModeOrDefault();
+        riverModeButton = Button.builder(riverModeLabel(), button -> {
+                    riverMode = riverMode.next();
+                    riverModeButton.setMessage(riverModeLabel());
+                    riverDescriptionWidget.setMessage(riverModeDescription());
+                })
+                .bounds(centerX - BUTTON_WIDTH, centerY + 4, BUTTON_WIDTH * 2, BUTTON_HEIGHT)
+                .build();
+        this.addRenderableWidget(riverModeButton);
+
+        riverDescriptionWidget = new StringWidget(0, centerY + 28, this.width, 9,
+                riverModeDescription(), this.font);
+        this.addRenderableWidget(riverDescriptionWidget);
+
         this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> onDonePressed())
-                .bounds(centerX - BUTTON_WIDTH - 5, centerY + 20, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .bounds(centerX - BUTTON_WIDTH - 5, centerY + 48, BUTTON_WIDTH, BUTTON_HEIGHT)
                 .build());
         this.addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> onClose())
-                .bounds(centerX + 5, centerY + 20, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .bounds(centerX + 5, centerY + 48, BUTTON_WIDTH, BUTTON_HEIGHT)
                 .build());
 
-        validationTextWidget = new StringWidget(0, centerY + 46, this.width, 9, Component.empty(), this.font);
+        validationTextWidget = new StringWidget(0, centerY + 74, this.width, 9, Component.empty(), this.font);
         this.addRenderableWidget(validationTextWidget);
+    }
+
+    private Component riverModeLabel() {
+        String name = switch (riverMode) {
+            case OFF -> "Off";
+            case FAST -> "Fast";
+            case DETAILED -> "Detailed";
+        };
+        return Component.literal("Rivers: " + name);
+    }
+
+    /** One line on what the choice costs, since the trade is not obvious from the name. */
+    private Component riverModeDescription() {
+        String text = switch (riverMode) {
+            case OFF -> "No rivers.";
+            case FAST -> "Short, frequent pauses. Smaller rivers.";
+            case DETAILED -> "Longer but rarer pauses. Allows major rivers.";
+        };
+        return Component.literal(text).copy().withStyle(style -> style.withColor(0xAAAAAA));
     }
 
     /**
@@ -110,6 +139,7 @@ public final class WorldScaleSettingsScreen extends Screen {
             }
             applyWorldHeightForScale(selectedScale);
             WorldScaleSelectionState.setPendingScale(selectedScale);
+            WorldScaleSelectionState.setPendingRiverMode(riverMode);
             onClose();
         } catch (NumberFormatException exception) {
             validationTextWidget.setMessage(ERROR_TEXT);
@@ -117,51 +147,12 @@ public final class WorldScaleSettingsScreen extends Screen {
     }
 
     /**
-     * Applies a pre-registered dimension type variant for the chosen scale.
+     * Applies a pre-registered dimension type variant for the chosen scale. The same swap
+     * runs again when the world is actually created, in case the preset changes after this.
      */
     private void applyWorldHeightForScale(int selectedScale) {
-        if (!(parentScreen instanceof CreateWorldScreen createWorldScreen)) {
-            return;
+        if (parentScreen instanceof CreateWorldScreen createWorldScreen) {
+            WorldScaleDimensions.apply(createWorldScreen, selectedScale);
         }
-
-        createWorldScreen.getUiState().updateDimensions((registryManager, selectedDimensions) -> {
-            WorldDimensions updatedDimensions = updateOverworldDimensionType(
-                    registryManager.lookupOrThrow(Registries.DIMENSION_TYPE),
-                    selectedDimensions,
-                    selectedScale);
-            return updatedDimensions == null ? selectedDimensions : updatedDimensions;
-        });
-    }
-
-    /**
-     * Replaces only the overworld dimension type entry with the scale-specific pre-registered one.
-     */
-    private WorldDimensions updateOverworldDimensionType(
-            HolderGetter<DimensionType> dimensionTypeRegistry,
-            WorldDimensions selectedDimensions,
-            int selectedScale
-    ) {
-        LevelStem overworldOptions = selectedDimensions.get(LevelStem.OVERWORLD).orElse(null);
-        if (overworldOptions == null) {
-            return null;
-        }
-
-        ResourceKey<DimensionType> dimensionTypeKey = ResourceKey.create(
-                Registries.DIMENSION_TYPE,
-                ResourceLocation.fromNamespaceAndPath(MOD_ID, "terrain_diffusion_scale_" + selectedScale));
-        Holder.Reference<DimensionType> selectedDimensionTypeEntry = dimensionTypeRegistry.get(dimensionTypeKey).orElse(null);
-        if (selectedDimensionTypeEntry == null) {
-            return null;
-        }
-
-        LevelStem updatedOverworldOptions = new LevelStem(
-                selectedDimensionTypeEntry,
-                overworldOptions.generator()
-        );
-
-        Map<ResourceKey<LevelStem>, LevelStem> updatedDimensionMap =
-                new HashMap<>(selectedDimensions.dimensions());
-        updatedDimensionMap.put(LevelStem.OVERWORLD, updatedOverworldOptions);
-        return new WorldDimensions(updatedDimensionMap);
     }
 }

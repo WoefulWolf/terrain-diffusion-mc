@@ -11,6 +11,7 @@ public final class WorldScaleManager {
     public static final int MAX_SCALE = 6;
 
     private static volatile int currentScale = DEFAULT_SCALE;
+    private static volatile RiverMode currentRiverMode = RiverMode.DEFAULT;
 
     private WorldScaleManager() {
     }
@@ -29,9 +30,29 @@ public final class WorldScaleManager {
             Integer pendingScale = WorldScaleSelectionState.consumePendingScale();
             int resolvedScale = pendingScale != null ? pendingScale : DEFAULT_SCALE;
             worldScaleSettingsState.setScale(resolvedScale);
+
+            // Rides on the same first-load handoff as scale, so a world keeps whatever was
+            // picked at creation and later worlds cannot inherit a stale selection.
+            RiverMode pendingRivers = WorldScaleSelectionState.consumePendingRiverMode();
+            if (pendingRivers != null) worldScaleSettingsState.setRiverMode(pendingRivers);
         }
 
         currentScale = clampScale(worldScaleSettingsState.getScale());
+        currentRiverMode = worldScaleSettingsState.getRiverMode();
+    }
+
+    /** Returns the river mode active for the loaded world. */
+    public static RiverMode getRiverMode() {
+        return currentRiverMode;
+    }
+
+    /** Updates river mode for the currently loaded world and persists it immediately. */
+    public static void setRiverMode(ServerLevel serverWorld, RiverMode mode) {
+        WorldScaleSettingsState worldScaleSettingsState = serverWorld.getDataStorage()
+                .computeIfAbsent(WorldScaleSettingsState.TYPE, "terrain_diffusion_world_settings");
+
+        worldScaleSettingsState.setRiverMode(mode);
+        currentRiverMode = mode;
     }
 
     /**

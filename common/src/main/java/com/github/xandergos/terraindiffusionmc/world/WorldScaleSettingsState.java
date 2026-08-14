@@ -18,22 +18,36 @@ public final class WorldScaleSettingsState extends SavedData {
             Codec.INT.optionalFieldOf("scale", WorldScaleManager.DEFAULT_SCALE)
                     .forGetter(WorldScaleSettingsState::getScale),
             Codec.BOOL.optionalFieldOf("explicit_scale", false)
-                    .forGetter(WorldScaleSettingsState::hasExplicitScale)
+                    .forGetter(WorldScaleSettingsState::hasExplicitScale),
+            // Optional so worlds saved before rivers existed still load.
+            Codec.STRING.optionalFieldOf("river_mode", RiverMode.DEFAULT.id())
+                    .forGetter(state -> state.riverMode.id())
     ).apply(instance, WorldScaleSettingsState::new));
 
     private int scale;
     private boolean explicitScale;
+    private RiverMode riverMode;
 
     /**
      * Creates a default state for worlds that do not yet have saved terrain diffusion settings.
      */
-    private WorldScaleSettingsState(int configuredScale, boolean hasExplicitScale) {
+    private WorldScaleSettingsState(int configuredScale, boolean hasExplicitScale, String riverModeId) {
         this.scale = WorldScaleManager.clampScale(configuredScale);
         this.explicitScale = hasExplicitScale;
+        this.riverMode = RiverMode.byId(riverModeId);
     }
 
     public static WorldScaleSettingsState createDefault() {
-        return new WorldScaleSettingsState(WorldScaleManager.DEFAULT_SCALE, false);
+        return new WorldScaleSettingsState(WorldScaleManager.DEFAULT_SCALE, false, RiverMode.DEFAULT.id());
+    }
+
+    public RiverMode getRiverMode() {
+        return riverMode;
+    }
+
+    public void setRiverMode(RiverMode mode) {
+        this.riverMode = mode;
+        setDirty();
     }
 
     /**

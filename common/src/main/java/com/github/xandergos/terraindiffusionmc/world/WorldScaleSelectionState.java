@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class WorldScaleSelectionState {
     private static final AtomicReference<Integer> PENDING_SCALE = new AtomicReference<>();
+    private static final AtomicReference<RiverMode> PENDING_RIVER_MODE = new AtomicReference<>();
 
     private WorldScaleSelectionState() {
     }
@@ -34,5 +35,21 @@ public final class WorldScaleSelectionState {
     public static int getPendingScaleOrDefault() {
         Integer pendingScale = PENDING_SCALE.get();
         return pendingScale != null ? pendingScale : WorldScaleManager.DEFAULT_SCALE;
+    }
+
+    /** Stores a pending river mode selected in world creation UI. */
+    public static void setPendingRiverMode(RiverMode mode) {
+        PENDING_RIVER_MODE.set(mode);
+    }
+
+    /** Returns and clears the pending river mode, if any. */
+    public static RiverMode consumePendingRiverMode() {
+        return PENDING_RIVER_MODE.getAndSet(null);
+    }
+
+    /** Returns the currently selected pending river mode, or the default if none is set. */
+    public static RiverMode getPendingRiverModeOrDefault() {
+        RiverMode mode = PENDING_RIVER_MODE.get();
+        return mode != null ? mode : RiverMode.DEFAULT;
     }
 }

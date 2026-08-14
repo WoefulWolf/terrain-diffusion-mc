@@ -4,6 +4,49 @@
 
 This is a Minecraft multiplateform mod integrating [Terrain Diffusion](https://github.com/xandergos/terrain-diffusion).
 
+## What this fork changes
+
+Forked from [xandergos/terrain-diffusion-mc](https://github.com/xandergos/terrain-diffusion-mc) at v2.3.0 (the `1.21.1` branch). Everything in this section is on top of that release.
+
+### More vanilla biomes
+
+|                                       | before   | now      |
+|---------------------------------------|----------|----------|
+| Vanilla overworld biomes generated    | 20 of 53 | 44 of 53 |
+| Overworld structures able to generate | 24       | 27       |
+
+The 24 new biomes are derived from climate signals the classifier already computed, so no model changes were needed:
+
+- **Oceans** — `deep_ocean`, `deep_cold_ocean`, `deep_frozen_ocean`, `lukewarm_ocean`, `deep_lukewarm_ocean`
+- **Forests** — `dark_forest`, `birch_forest`, `old_growth_birch_forest`, `old_growth_pine_taiga`, `old_growth_spruce_taiga`
+- **Jungle and wetland** — `sparse_jungle`, `bamboo_jungle`, `mangrove_swamp`
+- **Dry and high** — `wooded_badlands`, `eroded_badlands`, `savanna_plateau`, `windswept_savanna`, `windswept_forest`, `windswept_gravelly_hills`, `jagged_peaks`, `ice_spikes`
+- **Caves** — `dripstone_caves`, `lush_caves`, `deep_dark`, placed by depth below the local surface and biased by the biome above, so lush caves favour wet regions and dripstone dry ones
+
+`badlands` and `meadow` now generate as well.
+
+### Cave systems
+
+Cave generation now uses vanilla's Caves & Cliffs noise on top of the diffusion terrain: **cheese caverns, spaghetti tunnels, noodle caves, cave entrances and pillars**, alongside the carver tunnels and ravines that were already there. Aquifers are enabled to go with it, so caves below sea level are dry rather than flooded, with underground water and lava pockets where vanilla would put them.
+
+### Structures
+
+`ancient_city`, `ocean_monument` and `woodland_mansion` now have biomes to generate in, which brings with them sculk, the warden, echo shards, Swift Sneak, sponge, prismarine, elder guardians and dark oak. `buried_treasure` and `shipwreck_beached` are still waiting on beaches.
+
+The three custom biomes — `forest_sparse`, `taiga_sparse` and `snowy_taiga_sparse` — now carry the same biome tags as their vanilla counterparts, so structures generate in them and modded content keyed off `#minecraft:is_*` or `#c:is_*` applies to them too.
+
+### Mod compatibility
+
+Every biome added here is a vanilla biome key rather than a new namespaced one, so mods that edit vanilla biomes and structure mods keyed to vanilla biome tags pick them up with no extra work.
+
+### Not done yet
+
+Rivers, beaches and the shoreline biomes need a spatial pass over each terrain tile rather than per-pixel climate rules, so they are still missing, along with `cherry_grove`, `flower_forest`, `sunflower_plains` and `mushroom_fields`.
+
+### GPU stability
+
+Some GPU setups could hit a driver resource limit during long generation sessions, after which the integrated server would stop and the world could not be rejoined until Minecraft was restarted. The underlying resource leak in the ONNX session handling has been fixed. If you were setting `inference.offload_models=false` to work around it, that is no longer necessary.
+
 ## Which version should I use?
 
 Three builds are available on the [Releases](https://github.com/xandergos/terrain-diffusion-mc/releases) page:

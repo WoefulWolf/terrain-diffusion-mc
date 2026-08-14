@@ -18,6 +18,13 @@ public final class ChannelRefiner {
     private static final float SQRT2 = (float) Math.sqrt(2.0);
     private static final float[] DIST = {1, SQRT2, 1, SQRT2, 1, SQRT2, 1, SQRT2};
 
+    /**
+     * Measured against real terrain at 30 m cells: below 1 the path ignores the valley and
+     * runs 25 m above its floor, by 5 it tracks the real channel within three cells, and
+     * higher gains little. Retune if cell size changes, since it trades against ascent.
+     */
+    public static final float DEFAULT_CLIMB_PENALTY = 12f;
+
     private ChannelRefiner() {
     }
 

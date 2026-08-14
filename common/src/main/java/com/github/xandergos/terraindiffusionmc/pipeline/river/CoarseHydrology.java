@@ -8,7 +8,7 @@ import java.util.Arrays;
  * <p>Runs on the coarse tensor, where one pixel is 7.68 km. At that size a landmass is
  * only tens of cells across, so this yields basins, outlets, discharge and lakes, but not
  * a channel network: no threshold turns a twenty-cell basin into something that branches.
- * The network itself is traced against the real heightmap. See {@code docs/RIVERS.md}.
+ * The network itself is traced against the real heightmap.
  *
  * <p>Pure functions over float arrays: no Minecraft or tensor types, so it can be driven
  * from a test harness without launching the game.

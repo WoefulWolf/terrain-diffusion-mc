@@ -125,3 +125,4 @@ bin/
 .vscode/
 libs/
 mise.toml
+/docs

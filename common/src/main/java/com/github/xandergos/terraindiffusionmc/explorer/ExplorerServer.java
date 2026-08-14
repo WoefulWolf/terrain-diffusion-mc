@@ -5,6 +5,7 @@ import com.github.xandergos.terraindiffusionmc.infinitetensor.FloatTensor;
 import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider;
 import com.github.xandergos.terraindiffusionmc.pipeline.WorldPipelineModelConfig;
 import com.github.xandergos.terraindiffusionmc.pipeline.river.CoarseHydrology;
+import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverNetwork;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleManager;
 import com.google.gson.Gson;
 import com.sun.net.httpserver.HttpExchange;
@@ -256,7 +257,7 @@ public final class ExplorerServer {
      */
     /**
      * Renders the coarse drainage network: shaded land, lakes, and rivers coloured by
-     * discharge. Debug view for the river work; see {@code docs/RIVERS.md}.
+     * discharge. Debug view for the river work.
      *
      * <p>{@code river_pct} is the share of its own basin's outflow a cell must carry to
      * count as river.
@@ -296,22 +297,27 @@ public final class ExplorerServer {
             float meanPrecip = landCount > 0 ? precipSum / landCount : 0f;
             float minBasinOutflow = MIN_BASIN_CELLS * meanPrecip;
 
+            // Strahler order separates headwater from trunk more legibly than raw discharge.
+            int[] order = new int[H * W];
+            int maxOrder = 1;
+            for (RiverNetwork.Reach reach : RiverNetwork.extract(d, minBasinOutflow, fraction)) {
+                order[reach.from] = reach.order;
+                maxOrder = Math.max(maxOrder, reach.order);
+            }
+
             float[][] rgba = new float[4][H * W];
             int riverCells = 0, lakeCells = 0;
-            float logMax = (float) Math.log1p(Math.max(maxDischarge, 1f));
 
             for (int i = 0; i < H * W; i++) {
                 float r, g, b;
-                boolean isRiver = d.basinOutflow[i] >= minBasinOutflow
-                        && d.discharge[i] >= d.basinOutflow[i] * fraction;
+                boolean isRiver = order[i] > 0;
                 if (d.ocean[i]) {
                     r = 0.05f; g = 0.11f; b = 0.24f;
                 } else if (d.lake[i]) {
                     r = 0.16f; g = 0.44f; b = 0.74f;
                     lakeCells++;
                 } else if (isRiver) {
-                    // Bigger rivers run brighter, so trunk and tributary are separable.
-                    float t = clamp01((float) Math.log1p(d.discharge[i]) / Math.max(1e-6f, logMax));
+                    float t = maxOrder > 1 ? (order[i] - 1f) / (maxOrder - 1f) : 1f;
                     r = 0.25f + 0.75f * t;
                     g = 0.70f + 0.30f * t;
                     b = 0.95f + 0.05f * t;

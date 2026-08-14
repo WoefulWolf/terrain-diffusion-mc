@@ -394,6 +394,53 @@ public final class ExplorerServer {
     }
 
     /**
+     * Draws the drainage network over a relief map, in place.
+     *
+     * <p>Same analysis as the coarse layer, run on native-resolution elevation, where a
+     * window holds enough cells for a network to actually branch.
+     */
+    private static void overlayRivers(float[][] rgba, float[] elev, float[] climate,
+                                      int H, int W, float riverPct, int minBasinCells) {
+        int n = H * W;
+        // upsampleClimate emits temp, temp seasonality, precip, precip CV.
+        float[] precip = (climate != null && climate.length >= 3 * n)
+                ? Arrays.copyOfRange(climate, 2 * n, 3 * n) : null;
+
+        // At 30 m a cell is small enough that heightmap noise ponds constantly, so a lake
+        // has to clear a real area before it counts.
+        CoarseHydrology.Drainage d = CoarseHydrology.analyse(elev, precip, H, W, 250);
+
+        float precipSum = 0f;
+        int landCount = 0;
+        for (int i = 0; i < n; i++) {
+            if (d.ocean[i]) continue;
+            landCount++;
+            if (precip != null) precipSum += Math.max(0f, precip[i]);
+        }
+        float meanPrecip = (precip == null || landCount == 0) ? 1f : precipSum / landCount;
+        float minBasinOutflow = minBasinCells * meanPrecip;
+
+        int[] order = new int[n];
+        int maxOrder = 1;
+        for (RiverNetwork.Reach reach : RiverNetwork.extract(d, minBasinOutflow, riverPct / 100f)) {
+            order[reach.from] = reach.order;
+            maxOrder = Math.max(maxOrder, reach.order);
+        }
+
+        for (int i = 0; i < n; i++) {
+            if (d.ocean[i]) continue;
+            if (d.lake[i]) {
+                rgba[0][i] = 0.16f; rgba[1][i] = 0.44f; rgba[2][i] = 0.74f;
+            } else if (order[i] > 0) {
+                float t = maxOrder > 1 ? (order[i] - 1f) / (maxOrder - 1f) : 1f;
+                rgba[0][i] = 0.20f + 0.55f * t;
+                rgba[1][i] = 0.62f + 0.33f * t;
+                rgba[2][i] = 0.92f + 0.08f * t;
+            }
+        }
+    }
+
+    /**
      * GET /api/detail.png — port of detail_png().
      * Query params: ci, cj, detail_size, pan_i, pan_j, mode
      */
@@ -412,9 +459,10 @@ public final class ExplorerServer {
             int centerJ = cj * 256 + panJ;
             int half    = detailSize / 2;
 
+            boolean needsClimate = mode.equals("temperature") || mode.equals("rivers");
             float[][] out = LocalTerrainProvider.getPipelineData(
                     centerI - half, centerJ - half, centerI + half, centerJ + half,
-                    mode.equals("temperature"));
+                    needsClimate);
             float[] elevFlat  = out[0];
             float[] climate   = out[1];
             int H = detailSize, W = detailSize;
@@ -431,7 +479,7 @@ public final class ExplorerServer {
                 if (vmax == vmin) vmax = vmin + 1f;
                 rgba = applyColormap1D(temp, H, W, vmin, vmax, "rdbu_r");
             } else {
-                // relief mode (default)
+                // relief mode (default), and the base layer the river overlay draws onto
                 float[][] reliefRgb = ReliefMap.getReliefMap(elevFlat, H, W, 90.0);
                 rgba = new float[4][H * W];
                 for (int i = 0; i < H * W; i++) {
@@ -439,6 +487,11 @@ public final class ExplorerServer {
                     rgba[1][i] = reliefRgb[1][i];
                     rgba[2][i] = reliefRgb[2][i];
                     rgba[3][i] = 1f;
+                }
+                if (mode.equals("rivers")) {
+                    overlayRivers(rgba, elevFlat, climate, H, W,
+                            getFloat(q, "river_pct") == null ? 4f : getFloat(q, "river_pct"),
+                            getInt(q, "min_basin", 1500));
                 }
             }
 

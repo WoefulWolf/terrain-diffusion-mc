@@ -81,6 +81,15 @@ public final class CoarseHydrology {
      * @param width  columns
      */
     public static Drainage analyse(float[] elev, float[] precip, int height, int width) {
+        return analyse(elev, precip, height, width, 1);
+    }
+
+    /**
+     * @param minLakeCells ponds smaller than this are discarded. Depth alone cannot tell a
+     *                     lake from heightmap noise, and "small" depends on cell size.
+     */
+    public static Drainage analyse(float[] elev, float[] precip, int height, int width,
+                                   int minLakeCells) {
         int n = height * width;
         boolean[] ocean = new boolean[n];
         for (int i = 0; i < n; i++) {
@@ -93,6 +102,7 @@ public final class CoarseHydrology {
         for (int i = 0; i < n; i++) {
             lake[i] = !ocean[i] && filled[i] - elev[i] >= LAKE_MIN_DEPTH_M;
         }
+        if (minLakeCells > 1) dropSmallPonds(lake, height, width, minLakeCells);
 
         int[] downstream = routeD8(filled, ocean, height, width);
         float[] discharge = accumulate(filled, precip, downstream, ocean, n);
@@ -191,6 +201,45 @@ public final class CoarseHydrology {
             if (filled[i] == Float.MAX_VALUE) filled[i] = safeElev(elev[i]);
         }
         return filled;
+    }
+
+    /** Clears connected groups of lake cells smaller than {@code minCells}. */
+    private static void dropSmallPonds(boolean[] lake, int height, int width, int minCells) {
+        int n = height * width;
+        boolean[] seen = new boolean[n];
+        int[] stack = new int[Math.max(64, n / 16)];
+        int[] group = new int[Math.max(64, minCells * 2)];
+
+        for (int start = 0; start < n; start++) {
+            if (!lake[start] || seen[start]) continue;
+
+            int top = 0, count = 0;
+            stack[top++] = start;
+            seen[start] = true;
+
+            while (top > 0) {
+                int cur = stack[--top];
+                if (count == group.length) group = Arrays.copyOf(group, count * 2);
+                group[count++] = cur;
+
+                int r = cur / width;
+                int c = cur - r * width;
+                for (int d = 0; d < 8; d++) {
+                    int nr = r + DR[d];
+                    int nc = c + DC[d];
+                    if (nr < 0 || nr >= height || nc < 0 || nc >= width) continue;
+                    int ni = nr * width + nc;
+                    if (!lake[ni] || seen[ni]) continue;
+                    seen[ni] = true;
+                    if (top == stack.length) stack = Arrays.copyOf(stack, top * 2);
+                    stack[top++] = ni;
+                }
+            }
+
+            if (count < minCells) {
+                for (int k = 0; k < count; k++) lake[group[k]] = false;
+            }
+        }
     }
 
     /** Steepest-descent D8 over the filled surface. Ocean cells terminate flow. */

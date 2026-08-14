@@ -1,12 +1,18 @@
 package com.github.xandergos.terraindiffusionmc.pipeline;
 
 import com.github.xandergos.terraindiffusionmc.infinitetensor.FloatTensor;
+import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverCarver;
+import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverRegions;
+import com.github.xandergos.terraindiffusionmc.world.RiverMode;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Comparator;
@@ -45,16 +51,29 @@ public final class LocalTerrainProvider {
     }
 
     public static final class HeightmapData {
+        /** No river reaches this column; anything below sea level is the ocean's business. */
+        public static final short NO_WATER = Short.MIN_VALUE;
+
         public final short[][] heightmap;
         public final short[][] biomeIds;
+        /** River water surface in metres, or {@link #NO_WATER}. */
+        public final short[][] waterLevel;
+        /**
+         * Channel steepness where the rivers carved, {@code 1 + steep * 100}, or 0 where
+         * they never touched. Banks carry it too, so bank materials can follow the bed's.
+         */
+        public final byte[][] riverClass;
         public final int width;
         public final int height;
 
-        public HeightmapData(short[][] heightmap, short[][] biomeIds, int width, int height) {
-            this.heightmap = heightmap;
-            this.biomeIds  = biomeIds;
-            this.width     = width;
-            this.height    = height;
+        public HeightmapData(short[][] heightmap, short[][] biomeIds, short[][] waterLevel,
+                             byte[][] riverClass, int width, int height) {
+            this.heightmap  = heightmap;
+            this.biomeIds   = biomeIds;
+            this.waterLevel = waterLevel;
+            this.riverClass = riverClass;
+            this.width      = width;
+            this.height     = height;
         }
     }
 
@@ -180,6 +199,16 @@ public final class LocalTerrainProvider {
      * Blocks the calling thread until the tile is ready (one tile can take 10–30+ seconds).
      * If the caller is the server or a chunk worker, the game will stall until this returns.
      */
+    /**
+     * Cache-only lookup: null when the tile was never computed. Safe to call from hooks
+     * that may fire on worlds this generator does not own, since it never starts
+     * inference; a foreign world simply never has the tile.
+     */
+    public HeightmapData peekHeightmap(int i1, int j1, int i2, int j2) {
+        CacheEntry cached = CACHE.get(new CacheKey(i1, j1, i2, j2));
+        return cached == null ? null : cached.data();
+    }
+
     public HeightmapData fetchHeightmap(int i1, int j1, int i2, int j2) {
         CacheKey key = new CacheKey(i1, j1, i2, j2);
         CacheEntry cached = CACHE.get(key);
@@ -253,7 +282,10 @@ public final class LocalTerrainProvider {
         float[] climate  = out[1];
 
         short[] biomeFlat = BiomeClassifier.classify(elevFlat, climate, i1, j1, elevPadded, H, W, NATIVE_RESOLUTION);
-        return buildHeightmapData(elevFlat, biomeFlat, H, W);
+        float[] waterFlat = newWaterField(H * W);
+        byte[] riverClassFlat = new byte[H * W];
+        carveRivers(elevFlat, biomeFlat, climate, waterFlat, riverClassFlat, i1, j1, H, W, 1);
+        return buildHeightmapData(elevFlat, biomeFlat, waterFlat, riverClassFlat, H, W);
     }
 
     // =========================================================================
@@ -299,7 +331,10 @@ public final class LocalTerrainProvider {
         float[] elevOut = addElevationNoise(elevSmooth, elevPadded, i1, j1, H, W, pixelSizeM);
 
         short[] biomeFlat = BiomeClassifier.classify(elevSmooth, climate, i1, j1, elevPadded, H, W, pixelSizeM);
-        return buildHeightmapData(elevOut, biomeFlat, H, W);
+        float[] waterFlat = newWaterField(H * W);
+        byte[] riverClassFlat = new byte[H * W];
+        carveRivers(elevOut, biomeFlat, climate, waterFlat, riverClassFlat, i1, j1, H, W, scale);
+        return buildHeightmapData(elevOut, biomeFlat, waterFlat, riverClassFlat, H, W);
     }
 
     // =========================================================================
@@ -385,15 +420,480 @@ public final class LocalTerrainProvider {
         return a;
     }
 
-    private static HeightmapData buildHeightmapData(float[] elevFlat, short[] biomeFlat, int H, int W) {
+    /**
+     * Channel size against catchment. Depth keeps a weak power, as in nature, so a big river
+     * is far wider than it is deep.
+     *
+     * <p>The reference is the headwater catchment where tracing stops, so a river starts as
+     * a one-block spring. Flow spans roughly 250-fold from there to a major trunk, which is
+     * why the exponents sit near real hydraulic geometry: the width cap lands around a
+     * 150000-cell catchment, and a river spends thousands of blocks getting there instead
+     * of arriving fully sized a bend after its source.
+     */
+    private static final float RIVER_WIDTH_REFERENCE_CELLS = 600f;
+    private static final float RIVER_WIDTH_AT_REFERENCE = 0.5f;
+    private static final float RIVER_WIDTH_EXPONENT = 0.7f;
+    private static final float RIVER_MAX_HALF_WIDTH = 25f;
+    private static final float RIVER_DEPTH_AT_SOURCE = 1.4f;
+    private static final float RIVER_DEPTH_EXPONENT = 0.28f;
+    private static final float RIVER_MAX_DEPTH_BLOCKS = 10f;
+    /** Blocks of bank above the waterline. Enough to hold the river in without a levee. */
+    private static final float RIVER_FREEBOARD_BLOCKS = 1.0f;
+    /**
+     * Blocks of water a lake holds even where its basin is naturally shallower. Measured
+     * basins here run 2 to 20 m deep, under a single block at scale 2, so an uncarved lake
+     * would render as scattered puddles. Deepening the bed is what makes it read as water.
+     */
+    private static final float LAKE_MIN_WATER_BLOCKS = 2f;
+
+    /**
+     * Display width of a channel for the explorer, matching the carve's base curve before
+     * gradient modulation. Lives beside the constants it mirrors so they cannot drift.
+     */
+    public static float baseRiverHalfWidthBlocks(float flow) {
+        float catchment = Math.max(1f, flow / RIVER_WIDTH_REFERENCE_CELLS);
+        return Math.min(RIVER_MAX_HALF_WIDTH,
+                RIVER_WIDTH_AT_REFERENCE * (float) Math.pow(catchment, RIVER_WIDTH_EXPONENT));
+    }
+
+    /**
+     * Gradient is what separates width from depth. Catchment alone would make every river of
+     * a given size identical, but a steep reach cuts a narrow deep channel while a slack one
+     * spreads wide and shallow, which is why a gorge and a lowland river carrying the same
+     * water look nothing alike.
+     *
+     * <p>Gradient is read in blocks of fall per horizontal block, so the same numbers hold at
+     * any world scale. Measured over real channels here the median is 0.008 and the 90th
+     * percentile 0.042, so treating 0.04 as fully steep puts most of a river in the middle of
+     * the range and reserves the extremes for genuine mountain and floodplain reaches.
+     */
+    private static final int RIVER_GRADIENT_WINDOW = 12;
+    private static final float RIVER_STEEP_GRADIENT = 0.04f;
+    private static final float RIVER_WIDTH_WHEN_SLACK = 1.35f;
+    private static final float RIVER_WIDTH_WHEN_STEEP = 0.6f;
+    private static final float RIVER_DEPTH_WHEN_SLACK = 0.75f;
+    private static final float RIVER_DEPTH_WHEN_STEEP = 1.7f;
+    /**
+     * Half-window, in path blocks, that width and depth are averaged over before carving.
+     * The gradient modulation reacts faster than a real channel can, and unsmoothed the
+     * outline pinches and bulges every few blocks.
+     */
+    private static final int RIVER_SMOOTH_BLOCKS = 8;
+
+    /**
+     * Ocean mouths fade out as a submerged fan: over the last stretch the channel widens
+     * while its cut weakens to nothing, feathering into the shelf the way a delta spreads,
+     * instead of ending in a full-strength stamped disc. Only mouths near sea level fan
+     * out; a river meeting the sea off a cliff keeps its waterfall.
+     */
+    private static final float MOUTH_GROUND_BLOCKS = 2f;
+    private static final float MOUTH_FAN_WIDEN = 1f;
+    private static final int MOUTH_TAPER_MIN_BLOCKS = 8;
+    private static final int MOUTH_TAPER_MAX_BLOCKS = 96;
+    /**
+     * Depth a river shallows to across its mouth. The fade alone cannot soften a mouth:
+     * blending toward untouched ground is linear in fade while the bed sits up to ten
+     * blocks down, so most of the taper still cuts near-full depth and the trench ends in
+     * an underwater cliff. Rivers shoal over their own bars; the depth has to come up
+     * before the fade can feather what is left into the shelf.
+     */
+    private static final float MOUTH_DEPTH_BLOCKS = 2.5f;
+
+    /**
+     * A path that begins already carrying this much flow had its spring denied by the
+     * terrain, so its carve fades in over a few widths instead: the river gathers itself
+     * out of the ground rather than materialising at full size in dry country.
+     */
+    private static final float SOURCE_FADE_MIN_FLOW = 3000f;
+    private static final int SOURCE_FADE_MIN_BLOCKS = 16;
+    private static final int SOURCE_FADE_MAX_BLOCKS = 96;
+
+    /**
+     * Depth grading where a river meets a lake. A lake floor sits two blocks under its
+     * surface while a big river runs ten deep; unblended, the bed would leap the whole
+     * difference at the shoreline as an underwater cliff, with the last dry discs punched
+     * into the shallow pan as deep round holes. Instead the river shallows on approach,
+     * pushes a fading scour trench into the basin like a real mouth, and mid-lake the
+     * carve settles exactly onto the stamped floor and disappears.
+     */
+    private static final float RIVER_LAKE_TRANSITION_BLOCKS = 32f;
+    private static final float LAKE_ENTRY_SCOUR_BLOCKS = 2.5f;
+    private static final float LAKE_ENTRY_SCOUR_LEN_BLOCKS = 24f;
+
+    /**
+     * Cuts river channels into a freshly classified tile, in place.
+     *
+     * <p>Runs on the inference thread, so region terrain is fetched directly rather than
+     * resubmitted, which would deadlock. Paths come from the region's own drainage analysis
+     * at native resolution, where the D8 descent already is the channel, so a tile only has
+     * to carve the part of each path that crosses it.
+     */
+    private void carveRivers(float[] elev, short[] biomeFlat, float[] climate, float[] waterFlat,
+                             byte[] riverClassFlat, int i1, int j1, int height, int width, int scale) {
+        RiverMode mode = WorldScaleManager.getRiverMode();
+        if (mode == RiverMode.OFF) return;
+
+        // climate is laid out temp, temp seasonality, precip, precip CV; the carver only
+        // needs the leading temperature block to decide where a river freezes.
+        float[] temperature = (climate != null && climate.length >= height * width) ? climate : null;
+        float metresPerBlock = NATIVE_RESOLUTION / scale;
+
+        RiverRegions.Size regionSize = mode == RiverMode.FAST
+                ? RiverRegions.Size.SMALL : RiverRegions.Size.LARGE;
+
+        List<RiverRegions.Region> regions;
+        try {
+            regions = RiverRegions.forBlockWindow(i1, j1, i1 + height, j1 + width, scale,
+                    regionSize, (a, b, c, d) -> pipeline.get(a, b, c, d, true));
+        } catch (Exception e) {
+            LOG.warn("River paths unavailable for tile ({}, {}): {}", j1, i1, e.toString());
+            return;
+        }
+
+        int[] localPath = new int[Math.max(16, height * 2)];
+        float[] runHalf = new float[localPath.length];
+        float[] runDepth = new float[localPath.length];
+        float[] runSurf = new float[localPath.length];
+        float[] runSteep = new float[localPath.length];
+        float[] runFade = new float[localPath.length];
+
+        float[] edgeField = new float[height * width];
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                edgeField[row * width + col] = EDGE_NOISE.GetNoise(j1 + col, i1 + row);
+            }
+        }
+        float freeboardMetres = RIVER_FREEBOARD_BLOCKS * metresPerBlock;
+
+        // Water claims are first-wins and stamped largest first: lakes, then rivers by
+        // mouth size. A tributary reaching a bigger river finds those cells already wet
+        // at the lower surface, so its own water stops at the join and steps down like a
+        // little waterfall, instead of riding out over the river on its higher surface.
+        stampLakes(regions, elev, waterFlat, riverClassFlat, i1, j1, height, width,
+                metresPerBlock, freeboardMetres, scale);
+
+        List<RiverRegions.RiverPath> paths = new ArrayList<>();
+        for (RiverRegions.Region region : regions) paths.addAll(region.paths);
+        paths.sort((a, b) -> Float.compare(b.flow[b.flow.length - 1], a.flow[a.flow.length - 1]));
+
+        // Nearest-point claims within a channel, locked between channels: each path first
+        // locks everything already wet, so a smaller stream cannot restamp a bigger one.
+        float[] claimDist = new float[height * width];
+        Arrays.fill(claimDist, Float.POSITIVE_INFINITY);
+
+        for (RiverRegions.RiverPath path : paths) {
+            lockClaims(waterFlat, claimDist);
+            // Size the whole path before clipping to the tile, so the smoothing window sees
+            // the same neighbours in every tile and the channel cannot step at a border.
+            int len = path.blockX.length;
+            float[] pHalf = new float[len];
+            float[] pDepth = new float[len];
+            float[] pSteep = new float[len];
+            for (int k = 0; k < len; k++) {
+                float catchment = Math.max(1f, path.flow[k] / RIVER_WIDTH_REFERENCE_CELLS);
+                float gradient = gradientAt(path, k) / metresPerBlock;
+                float steep = clamp01(gradient / RIVER_STEEP_GRADIENT);
+
+                pSteep[k] = steep;
+                pHalf[k] = Math.min(RIVER_MAX_HALF_WIDTH,
+                        RIVER_WIDTH_AT_REFERENCE * (float) Math.pow(catchment, RIVER_WIDTH_EXPONENT)
+                                * lerp(RIVER_WIDTH_WHEN_SLACK, RIVER_WIDTH_WHEN_STEEP, steep));
+                pDepth[k] = Math.min(RIVER_MAX_DEPTH_BLOCKS,
+                        RIVER_DEPTH_AT_SOURCE * (float) Math.pow(catchment, RIVER_DEPTH_EXPONENT)
+                                * lerp(RIVER_DEPTH_WHEN_SLACK, RIVER_DEPTH_WHEN_STEEP, steep));
+            }
+            float[] pFade = new float[len];
+            Arrays.fill(pFade, 1f);
+            if (path.ground[len - 1] < MOUTH_GROUND_BLOCKS * metresPerBlock) {
+                int taper = Math.min(len, Math.max(MOUTH_TAPER_MIN_BLOCKS,
+                        Math.min(MOUTH_TAPER_MAX_BLOCKS, Math.round(3f * pHalf[len - 1]))));
+                for (int k = len - taper; k < len; k++) {
+                    float p = (k - (len - taper)) / (float) Math.max(1, taper - 1);
+                    pFade[k] = 1f - p;
+                    pHalf[k] = Math.min(RIVER_MAX_HALF_WIDTH * 2f,
+                            pHalf[k] * (1f + MOUTH_FAN_WIDEN * p));
+                    float shoal = Math.min(pDepth[k], MOUTH_DEPTH_BLOCKS);
+                    pDepth[k] = pDepth[k] + (shoal - pDepth[k]) * p;
+                }
+            }
+
+            // Distances to the nearest lake point and the nearest open-channel point, for
+            // grading depth through lake mouths.
+            int far = 1 << 28;
+            int[] dWet = new int[len];
+            int[] dDry = new int[len];
+            int runWet = far, runDry = far;
+            for (int k = 0; k < len; k++) {
+                runWet = path.submerged[k] ? 0 : (runWet == far ? far : runWet + 1);
+                runDry = !path.submerged[k] ? 0 : (runDry == far ? far : runDry + 1);
+                dWet[k] = runWet;
+                dDry[k] = runDry;
+            }
+            runWet = far;
+            runDry = far;
+            for (int k = len - 1; k >= 0; k--) {
+                runWet = path.submerged[k] ? 0 : (runWet == far ? far : runWet + 1);
+                runDry = !path.submerged[k] ? 0 : (runDry == far ? far : runDry + 1);
+                dWet[k] = Math.min(dWet[k], runWet);
+                dDry[k] = Math.min(dDry[k], runDry);
+            }
+            for (int k = 0; k < len; k++) {
+                // The scour scales with the river, so a brook slips into a pond unchanged
+                // while a major river pushes a real trench through the shore.
+                float boundaryDepth = LAKE_MIN_WATER_BLOCKS
+                        + Math.min(LAKE_ENTRY_SCOUR_BLOCKS, 0.4f * pDepth[k]);
+                if (path.submerged[k]) {
+                    float scour = clamp01(1f - dDry[k] / LAKE_ENTRY_SCOUR_LEN_BLOCKS);
+                    pDepth[k] = LAKE_MIN_WATER_BLOCKS
+                            + (boundaryDepth - LAKE_MIN_WATER_BLOCKS) * scour;
+                } else if (dWet[k] < RIVER_LAKE_TRANSITION_BLOCKS) {
+                    float t = dWet[k] / RIVER_LAKE_TRANSITION_BLOCKS;
+                    pDepth[k] = boundaryDepth + (pDepth[k] - boundaryDepth) * t;
+                }
+            }
+
+            if (path.flow[0] >= SOURCE_FADE_MIN_FLOW) {
+                int fadeLen = Math.min(len, Math.max(SOURCE_FADE_MIN_BLOCKS,
+                        Math.min(SOURCE_FADE_MAX_BLOCKS, Math.round(6f * pHalf[0]))));
+                for (int k = 0; k < fadeLen; k++) {
+                    float p = k / (float) Math.max(1, fadeLen - 1);
+                    pFade[k] = Math.min(pFade[k], p);
+                }
+            }
+
+            boxSmooth(pHalf, RIVER_SMOOTH_BLOCKS);
+            boxSmooth(pDepth, RIVER_SMOOTH_BLOCKS);
+            boxSmooth(pSteep, RIVER_SMOOTH_BLOCKS);
+            boxSmooth(pFade, RIVER_SMOOTH_BLOCKS);
+
+            int count = 0;
+            for (int k = 0; k < len; k++) {
+                int col = path.blockX[k] - j1;
+                int row = path.blockZ[k] - i1;
+                boolean inside = col >= 0 && col < width && row >= 0 && row < height;
+
+                // Lake crossings carve too, at the graded depth above: mid-lake the cut
+                // settles onto the stamped floor and vanishes, and the water is already
+                // the lake's own first claim, so only the mouths differ.
+                if (inside) {
+                    if (count == localPath.length) {
+                        localPath = Arrays.copyOf(localPath, count * 2);
+                        runHalf = Arrays.copyOf(runHalf, count * 2);
+                        runDepth = Arrays.copyOf(runDepth, count * 2);
+                        runSurf = Arrays.copyOf(runSurf, count * 2);
+                        runSteep = Arrays.copyOf(runSteep, count * 2);
+                        runFade = Arrays.copyOf(runFade, count * 2);
+                    }
+                    localPath[count] = row * width + col;
+                    runHalf[count] = pHalf[k];
+                    runDepth[count] = pDepth[k];
+                    runSteep[count] = pSteep[k];
+                    runFade[count] = pFade[k];
+                    // Taken from the drainage analysis rather than from this tile. That
+                    // elevation already descends along the path and is shared by every tile
+                    // the river crosses, so the water surface cannot step at a tile border.
+                    runSurf[count] = path.ground[k] - freeboardMetres;
+                    count++;
+                } else if (count > 0) {
+                    // A path may leave and re-enter, so carve each run as it closes.
+                    carveRun(elev, biomeFlat, temperature, waterFlat, claimDist, riverClassFlat,
+                            edgeField, height, width, localPath, runHalf, runDepth, runSurf,
+                            runSteep, runFade, metresPerBlock, count);
+                    count = 0;
+                }
+            }
+            if (count > 0) {
+                carveRun(elev, biomeFlat, temperature, waterFlat, claimDist, riverClassFlat,
+                        edgeField, height, width, localPath, runHalf, runDepth, runSurf,
+                        runSteep, runFade, metresPerBlock, count);
+            }
+        }
+
+        featherBeds(elev, waterFlat, i1, j1, height, width, metresPerBlock);
+    }
+
+    /**
+     * Lakes: water stands at the basin's spill level, less the same freeboard as the
+     * channels, so a river entering a lake meets it at exactly its own surface. The bed is
+     * lowered to hold a minimum depth of water, because the basins this terrain makes are
+     * broad but shallow, and left alone they would read as scattered puddles rather than a
+     * lake.
+     */
+    private static void stampLakes(List<RiverRegions.Region> regions, float[] elev,
+                                   float[] waterFlat, byte[] riverClassFlat,
+                                   int i1, int j1, int height, int width,
+                                   float metresPerBlock, float freeboardMetres, int scale) {
+        for (RiverRegions.Region region : regions) {
+            for (int k = 0; k < region.lakeSurface.length; k++) {
+                float spill = region.lakeSurface[k];
+                float level = spill - freeboardMetres;
+                // A coastal basin can sit lower than a full freeboard above the sea. Tuck
+                // the water just below its rim rather than leaving a dry pan.
+                if (level <= 0f) level = spill - 0.35f * metresPerBlock;
+                if (level <= 0f) continue;
+                float bedCap = level - LAKE_MIN_WATER_BLOCKS * metresPerBlock;
+                for (int dz = 0; dz < scale; dz++) {
+                    int row = region.lakeBlockZ[k] + dz - i1;
+                    if (row < 0 || row >= height) continue;
+                    for (int dx = 0; dx < scale; dx++) {
+                        int col = region.lakeBlockX[k] + dx - j1;
+                        if (col < 0 || col >= width) continue;
+                        int idx = row * width + col;
+                        if (elev[idx] > bedCap) elev[idx] = bedCap;
+                        if (waterFlat != null && waterFlat[idx] == Float.NEGATIVE_INFINITY) {
+                            waterFlat[idx] = level;
+                        }
+                        // Slack class, so the bed pass gives lake floors sand and clay.
+                        if (riverClassFlat != null && riverClassFlat[idx] == 0) riverClassFlat[idx] = 1;
+                    }
+                }
+
+                // A lake sits a freeboard below its shore, and a one-block wall of water
+                // cannot be climbed out of. Dithered spots of the shore ring are lowered
+                // flush with the surface, so some of the bank is always a way out.
+                for (int dz = -scale; dz < 2 * scale; dz++) {
+                    int row = region.lakeBlockZ[k] + dz - i1;
+                    if (row < 0 || row >= height) continue;
+                    for (int dx = -scale; dx < 2 * scale; dx++) {
+                        int col = region.lakeBlockX[k] + dx - j1;
+                        if (col < 0 || col >= width) continue;
+                        int idx = row * width + col;
+                        if (waterFlat == null || waterFlat[idx] != Float.NEGATIVE_INFINITY) continue;
+                        if (elev[idx] <= level || elev[idx] > level + 1.4f * metresPerBlock) continue;
+                        int hash = positionHash(region.lakeBlockX[k] + dx, region.lakeBlockZ[k] + dz);
+                        if (hash < 96) elev[idx] = level + 0.05f * metresPerBlock;
+                    }
+                }
+            }
+        }
+    }
+
+    /** Deterministic 0..255 from world position, for dithers that agree across tiles. */
+    private static int positionHash(int x, int z) {
+        int h = x * 0x9E3779B1 + z * 0x85EBCA77;
+        h ^= h >>> 15;
+        h *= 0x2C1B3C6D;
+        h ^= h >>> 12;
+        return h & 0xFF;
+    }
+
+    /**
+     * Coherent relief for every wetted floor. The carver stamps flat discs along the path,
+     * and where they overlap the bed steps in concentric arcs that read as brush strokes
+     * from the surface. Sampled at world coordinates so tiles agree, and capped half a
+     * block under the water surface so the feathering can never break the waterline.
+     */
+    private static final FastNoiseLite BED_NOISE = makeFnl(0x52BED, 0.05f, 3, 2f, 0.5f);
+    private static final float BED_NOISE_BLOCKS = 1.4f;
+    /** Waterline wobble, sampled at world coordinates so every tile draws the same edge. */
+    private static final FastNoiseLite EDGE_NOISE = makeFnl(0x51DE5, 0.08f, 2, 2f, 0.5f);
+
+    private static void featherBeds(float[] elev, float[] waterFlat,
+                                    int i1, int j1, int height, int width,
+                                    float metresPerBlock) {
+        if (waterFlat == null) return;
+        float amp = BED_NOISE_BLOCKS * metresPerBlock;
+        float clearance = 0.5f * metresPerBlock;
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                int idx = row * width + col;
+                float surface = waterFlat[idx];
+                // At or below sea level the surface claim is the ocean's business, and
+                // clamping against it would gouge the shelf into a trench at the mouth.
+                if (surface == Float.NEGATIVE_INFINITY || surface <= 0f) continue;
+                float shifted = elev[idx] + BED_NOISE.GetNoise(j1 + col, i1 + row) * amp;
+                elev[idx] = Math.min(shifted, surface - clearance);
+            }
+        }
+    }
+
+    /** In-place moving average with a window that shrinks symmetrically at the ends. */
+    private static void boxSmooth(float[] values, int halfWindow) {
+        int n = values.length;
+        if (n < 3) return;
+        float[] out = new float[n];
+        for (int k = 0; k < n; k++) {
+            int r = Math.min(halfWindow, Math.min(k, n - 1 - k));
+            float sum = 0f;
+            for (int t = k - r; t <= k + r; t++) sum += values[t];
+            out[k] = sum / (2 * r + 1);
+        }
+        System.arraycopy(out, 0, values, 0, n);
+    }
+
+    /**
+     * Downstream fall in metres per block around a path point. Read over a window rather than
+     * between neighbours: consecutive points are interpolated between analysis cells, so an
+     * adjacent pair often carries no gradient at all.
+     */
+    private static float gradientAt(RiverRegions.RiverPath path, int k) {
+        int last = path.ground.length - 1;
+        int lo = Math.max(0, k - RIVER_GRADIENT_WINDOW);
+        int hi = Math.min(last, k + RIVER_GRADIENT_WINDOW);
+        int span = hi - lo;
+        if (span <= 0) return 0f;
+        return Math.max(0f, (path.ground[lo] - path.ground[hi]) / span);
+    }
+
+    private static float lerp(float a, float b, float t) {
+        return a + (b - a) * t;
+    }
+
+    private static float clamp01(float v) {
+        return v < 0f ? 0f : (v > 1f ? 1f : v);
+    }
+
+    /** Marks every currently wet cell as settled, so later channels cannot restamp it. */
+    private static void lockClaims(float[] waterFlat, float[] claimDist) {
+        for (int i = 0; i < claimDist.length; i++) {
+            if (waterFlat[i] != Float.NEGATIVE_INFINITY) claimDist[i] = -1f;
+        }
+    }
+
+    private static void carveRun(float[] elev, short[] biomeFlat, float[] temperature,
+                                 float[] waterFlat, float[] claimDist, byte[] riverClassFlat,
+                                 float[] edgeField, int height, int width,
+                                 int[] buffer, float[] halfWidths, float[] depths,
+                                 float[] surfaces, float[] steeps, float[] fades,
+                                 float metresPerBlock, int count) {
+        if (count < 2) return;
+        RiverCarver.carveChannel(elev, biomeFlat, temperature, waterFlat, claimDist,
+                riverClassFlat, height, width,
+                Arrays.copyOf(buffer, count), Arrays.copyOf(halfWidths, count),
+                Arrays.copyOf(depths, count), Arrays.copyOf(surfaces, count),
+                Arrays.copyOf(steeps, count), Arrays.copyOf(fades, count), edgeField,
+                RIVER_FREEBOARD_BLOCKS, metresPerBlock,
+                BiomeClassifier.RIVER, BiomeClassifier.FROZEN_RIVER);
+    }
+
+    /** Water surface for a column the rivers never reached. */
+    private static float[] newWaterField(int n) {
+        float[] water = new float[n];
+        Arrays.fill(water, Float.NEGATIVE_INFINITY);
+        return water;
+    }
+
+    private static HeightmapData buildHeightmapData(float[] elevFlat, short[] biomeFlat,
+                                                    float[] waterFlat, byte[] riverClassFlat,
+                                                    int H, int W) {
         short[][] heightmap = new short[H][W];
         short[][] biomeIds  = new short[H][W];
+        short[][] waterLevel = new short[H][W];
+        byte[][] riverClass = new byte[H][W];
         for (int r = 0; r < H; r++)
             for (int c = 0; c < W; c++) {
-                float e = elevFlat[r * W + c];
+                int idx = r * W + c;
+                float e = elevFlat[idx];
                 heightmap[r][c] = (short) Math.max(-32768, Math.min(32767, (int) Math.floor(e)));
-                biomeIds[r][c]  = biomeFlat[r * W + c];
+                biomeIds[r][c]  = biomeFlat[idx];
+                riverClass[r][c] = riverClassFlat == null ? 0 : riverClassFlat[idx];
+
+                // Sea level is 0 m, so a surface at or below it is the ocean's to fill.
+                float w = waterFlat == null ? Float.NEGATIVE_INFINITY : waterFlat[idx];
+                waterLevel[r][c] = w > 0f
+                        ? (short) Math.min(32767, (int) Math.floor(w))
+                        : HeightmapData.NO_WATER;
             }
-        return new HeightmapData(heightmap, biomeIds, W, H);
+        return new HeightmapData(heightmap, biomeIds, waterLevel, riverClass, W, H);
     }
 }

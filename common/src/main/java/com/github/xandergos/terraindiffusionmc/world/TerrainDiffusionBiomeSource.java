@@ -129,6 +129,8 @@ public class TerrainDiffusionBiomeSource extends BiomeSource {
                     entry((short) 27, vanilla(Biomes.ERODED_BADLANDS)),
                     entry((short) 28, vanilla(Biomes.WOODED_BADLANDS)),
                     entry((short) 34, vanilla(Biomes.JAGGED_PEAKS)),
+                    entry((short) 36, vanilla(Biomes.RIVER)),
+                    entry((short) 37, vanilla(Biomes.FROZEN_RIVER)),
                     entry((short) 42, vanilla(Biomes.LUKEWARM_OCEAN)),
                     entry((short) 43, vanilla(Biomes.DEEP_LUKEWARM_OCEAN)),
                     entry((short) 45, vanilla(Biomes.DEEP_OCEAN)),

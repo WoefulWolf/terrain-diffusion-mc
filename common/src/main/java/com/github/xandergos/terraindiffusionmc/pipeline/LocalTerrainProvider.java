@@ -600,12 +600,18 @@ public final class LocalTerrainProvider {
             return;
         }
 
-        int[] localPath = new int[Math.max(16, height * 2)];
-        float[] runHalf = new float[localPath.length];
-        float[] runDepth = new float[localPath.length];
-        float[] runSurf = new float[localPath.length];
-        float[] runSteep = new float[localPath.length];
-        float[] runFade = new float[localPath.length];
+        int[] localRow = new int[Math.max(16, height * 2)];
+        int[] localCol = new int[localRow.length];
+        float[] runHalf = new float[localRow.length];
+        float[] runDepth = new float[localRow.length];
+        float[] runSurf = new float[localRow.length];
+        float[] runSteep = new float[localRow.length];
+        float[] runFade = new float[localRow.length];
+
+        // A channel centred just outside the tile still hangs its rim into it, so path
+        // points are kept within the widest possible footprint of the border. The fan
+        // at an ocean mouth can double the half-width, hence the 2.
+        int carveMargin = RiverCarver.maxReachBlocks(maxHalfWidth * 2f, params.edgeWobbleBlocks);
 
         float[] edgeField = new float[height * width];
         for (int row = 0; row < height; row++) {
@@ -723,21 +729,24 @@ public final class LocalTerrainProvider {
             for (int k = 0; k < len; k++) {
                 int col = path.blockX[k] - j1;
                 int row = path.blockZ[k] - i1;
-                boolean inside = col >= 0 && col < width && row >= 0 && row < height;
+                boolean inside = col >= -carveMargin && col < width + carveMargin
+                        && row >= -carveMargin && row < height + carveMargin;
 
                 // Lake crossings carve too, at the graded depth above: mid-lake the cut
                 // settles onto the stamped floor and vanishes, and the water is already
                 // the lake's own first claim, so only the mouths differ.
                 if (inside) {
-                    if (count == localPath.length) {
-                        localPath = Arrays.copyOf(localPath, count * 2);
+                    if (count == localRow.length) {
+                        localRow = Arrays.copyOf(localRow, count * 2);
+                        localCol = Arrays.copyOf(localCol, count * 2);
                         runHalf = Arrays.copyOf(runHalf, count * 2);
                         runDepth = Arrays.copyOf(runDepth, count * 2);
                         runSurf = Arrays.copyOf(runSurf, count * 2);
                         runSteep = Arrays.copyOf(runSteep, count * 2);
                         runFade = Arrays.copyOf(runFade, count * 2);
                     }
-                    localPath[count] = row * width + col;
+                    localRow[count] = row;
+                    localCol[count] = col;
                     runHalf[count] = pHalf[k];
                     runDepth[count] = pDepth[k];
                     runSteep[count] = pSteep[k];
@@ -750,14 +759,14 @@ public final class LocalTerrainProvider {
                 } else if (count > 0) {
                     // A path may leave and re-enter, so carve each run as it closes.
                     carveRun(elev, biomeFlat, temperature, waterFlat, claimDist, riverClassFlat,
-                            edgeField, params, height, width, localPath, runHalf, runDepth,
+                            edgeField, params, height, width, localRow, localCol, runHalf, runDepth,
                             runSurf, runSteep, runFade, metresPerBlock, count);
                     count = 0;
                 }
             }
             if (count > 0) {
                 carveRun(elev, biomeFlat, temperature, waterFlat, claimDist, riverClassFlat,
-                        edgeField, params, height, width, localPath, runHalf, runDepth,
+                        edgeField, params, height, width, localRow, localCol, runHalf, runDepth,
                         runSurf, runSteep, runFade, metresPerBlock, count);
             }
 
@@ -1080,13 +1089,14 @@ public final class LocalTerrainProvider {
     private static void carveRun(float[] elev, short[] biomeFlat, float[] temperature,
                                  float[] waterFlat, float[] claimDist, byte[] riverClassFlat,
                                  float[] edgeField, RiverParameters params, int height, int width,
-                                 int[] buffer, float[] halfWidths, float[] depths,
+                                 int[] rows, int[] cols, float[] halfWidths, float[] depths,
                                  float[] surfaces, float[] steeps, float[] fades,
                                  float metresPerBlock, int count) {
         if (count < 2) return;
         RiverCarver.carveChannel(elev, biomeFlat, temperature, waterFlat, claimDist,
                 riverClassFlat, height, width,
-                Arrays.copyOf(buffer, count), Arrays.copyOf(halfWidths, count),
+                Arrays.copyOf(rows, count), Arrays.copyOf(cols, count),
+                Arrays.copyOf(halfWidths, count),
                 Arrays.copyOf(depths, count), Arrays.copyOf(surfaces, count),
                 Arrays.copyOf(steeps, count), Arrays.copyOf(fades, count), edgeField,
                 params.freeboardBlocks, params.edgeWobbleBlocks, metresPerBlock,

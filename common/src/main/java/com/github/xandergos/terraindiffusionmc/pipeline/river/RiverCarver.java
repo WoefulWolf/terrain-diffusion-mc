@@ -45,6 +45,16 @@ public final class RiverCarver {
     }
 
     /**
+     * Widest possible footprint of a path point, in blocks from its centre. Callers
+     * collecting path points near a tile must extend their margin this far, or a channel
+     * running just outside the border leaves its overhanging rim uncarved in the tile
+     * that owns those blocks.
+     */
+    public static int maxReachBlocks(float maxHalfWidth, float edgeWobbleMax) {
+        return (int) Math.ceil(maxHalfWidth + MAX_BANK_CELLS + edgeWobbleMax);
+    }
+
+    /**
      * Cuts one channel, lowering {@code elev} and stamping the river biome id in place.
      *
      * @param elev          elevation in metres, row-major, mutated
@@ -60,7 +70,9 @@ public final class RiverCarver {
      *                      and the quantised steps land as random bumps and bank ridges
      * @param riverClass    per-cell channel steepness for bed materials, mutated; 0 means
      *                      the rivers never touched the cell, else {@code 1 + steep * 100}
-     * @param path          cell indices from upstream to downstream
+     * @param pathRow       path point rows from upstream to downstream; may lie outside
+     *                      the tile, only in-bounds cells of the disc are written
+     * @param pathCol       path point columns, same length and convention
      * @param halfWidths    half-width of the flat bed in blocks at each point
      * @param depths        water depth in blocks at each point
      * @param surfaces      water surface elevation in metres at each point, non-increasing
@@ -77,19 +89,18 @@ public final class RiverCarver {
      */
     public static void carveChannel(float[] elev, short[] biomeIds, float[] temperature,
                                     float[] waterLevel, float[] claimDist, byte[] riverClass,
-                                    int height, int width, int[] path,
+                                    int height, int width, int[] pathRow, int[] pathCol,
                                     float[] halfWidths, float[] depths, float[] surfaces,
                                     float[] steeps, float[] fades, float[] edgeWobble,
                                     float freeboard, float edgeWobbleMax, float metresPerBlock,
                                     short riverId, short frozenRiverId) {
-        if (path == null || path.length == 0) return;
+        if (pathRow == null || pathRow.length == 0) return;
         float wetCut = WET_MIN_DEPTH_BLOCKS * metresPerBlock;
 
-        for (int step = 0; step < path.length; step++) {
+        for (int step = 0; step < pathRow.length; step++) {
             float fade = fades[step];
             if (fade <= 0.02f) continue;
 
-            int cell = path[step];
             float surface = surfaces[step];
             float depth = depths[step];
             float bed = surface - depth * metresPerBlock;
@@ -105,8 +116,11 @@ public final class RiverCarver {
                     : Math.min(1f, radius / EDGE_WOBBLE_FULL_RADIUS) * edgeWobbleMax;
             int reach = (int) Math.ceil(radius + bank + wobbleAmp);
 
-            int r0 = cell / width;
-            int c0 = cell - r0 * width;
+            int r0 = pathRow[step];
+            int c0 = pathCol[step];
+            // An out-of-tile point whose whole disc misses the tile costs nothing.
+            if (r0 + reach < 0 || r0 - reach >= height
+                    || c0 + reach < 0 || c0 - reach >= width) continue;
 
             for (int dr = -reach; dr <= reach; dr++) {
                 int r = r0 + dr;

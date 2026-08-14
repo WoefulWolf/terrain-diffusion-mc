@@ -6,6 +6,8 @@ import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider;
 import com.github.xandergos.terraindiffusionmc.pipeline.WorldPipelineModelConfig;
 import com.github.xandergos.terraindiffusionmc.pipeline.river.CoarseHydrology;
 import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverNetwork;
+import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverRegions;
+import com.github.xandergos.terraindiffusionmc.world.RiverMode;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleManager;
 import com.google.gson.Gson;
 import com.sun.net.httpserver.HttpExchange;
@@ -394,48 +396,64 @@ public final class ExplorerServer {
     }
 
     /**
-     * Draws the drainage network over a relief map, in place.
-     *
-     * <p>Same analysis as the coarse layer, run on native-resolution elevation, where a
-     * window holds enough cells for a network to actually branch.
+     * Draws the rivers and lakes the generator will actually place: the same cached
+     * region analysis, selection, and culling as world generation, so what this shows is
+     * what a teleport finds. Any independent extraction here would happily display
+     * networks the generator rejects.
      */
-    private static void overlayRivers(float[][] rgba, float[] elev, float[] climate,
-                                      int H, int W, float riverPct, int minBasinCells) {
-        int n = H * W;
-        // upsampleClimate emits temp, temp seasonality, precip, precip CV.
-        float[] precip = (climate != null && climate.length >= 3 * n)
-                ? Arrays.copyOfRange(climate, 2 * n, 3 * n) : null;
+    private static void overlayRivers(float[][] rgba, int H, int W, int i0, int j0)
+            throws Exception {
+        RiverMode mode = WorldScaleManager.getRiverMode();
+        if (mode == RiverMode.OFF) return;
+        int scale = WorldScaleManager.getCurrentScale();
+        RiverRegions.Size size = mode == RiverMode.FAST
+                ? RiverRegions.Size.SMALL : RiverRegions.Size.LARGE;
 
-        // At 30 m a cell is small enough that heightmap noise ponds constantly, so a lake
-        // has to clear a real area before it counts.
-        CoarseHydrology.Drainage d = CoarseHydrology.analyse(elev, precip, H, W, 250);
+        java.util.List<RiverRegions.Region> regions = RiverRegions.forBlockWindow(
+                i0 * scale, j0 * scale, (i0 + H) * scale, (j0 + W) * scale,
+                scale, size, (a, b, c, d) -> LocalTerrainProvider.getPipelineData(a, b, c, d, true));
 
-        float precipSum = 0f;
-        int landCount = 0;
-        for (int i = 0; i < n; i++) {
-            if (d.ocean[i]) continue;
-            landCount++;
-            if (precip != null) precipSum += Math.max(0f, precip[i]);
+        for (RiverRegions.Region region : regions) {
+            for (int k = 0; k < region.lakeSurface.length; k++) {
+                int r = Math.floorDiv(region.lakeBlockZ[k], scale) - i0;
+                int c = Math.floorDiv(region.lakeBlockX[k], scale) - j0;
+                if (r < 0 || r >= H || c < 0 || c >= W) continue;
+                int idx = r * W + c;
+                rgba[0][idx] = 0.16f; rgba[1][idx] = 0.44f; rgba[2][idx] = 0.74f;
+            }
         }
-        float meanPrecip = (precip == null || landCount == 0) ? 1f : precipSum / landCount;
-        float minBasinOutflow = minBasinCells * meanPrecip;
 
-        int[] order = new int[n];
         int maxOrder = 1;
-        for (RiverNetwork.Reach reach : RiverNetwork.extract(d, minBasinOutflow, riverPct / 100f)) {
-            order[reach.from] = reach.order;
-            maxOrder = Math.max(maxOrder, reach.order);
+        for (RiverRegions.Region region : regions) {
+            for (RiverRegions.RiverPath path : region.paths) {
+                maxOrder = Math.max(maxOrder, path.order);
+            }
         }
-
-        for (int i = 0; i < n; i++) {
-            if (d.ocean[i]) continue;
-            if (d.lake[i]) {
-                rgba[0][i] = 0.16f; rgba[1][i] = 0.44f; rgba[2][i] = 0.74f;
-            } else if (order[i] > 0) {
-                float t = maxOrder > 1 ? (order[i] - 1f) / (maxOrder - 1f) : 1f;
-                rgba[0][i] = 0.20f + 0.55f * t;
-                rgba[1][i] = 0.62f + 0.33f * t;
-                rgba[2][i] = 0.92f + 0.08f * t;
+        for (RiverRegions.Region region : regions) {
+            for (RiverRegions.RiverPath path : region.paths) {
+                float t = maxOrder > 1 ? (path.order - 1f) / (maxOrder - 1f) : 1f;
+                float pr = 0.20f + 0.55f * t;
+                float pg = 0.62f + 0.33f * t;
+                float pb = 0.92f + 0.08f * t;
+                for (int k = 0; k < path.blockX.length; k++) {
+                    if (path.submerged[k]) continue;
+                    int r = Math.floorDiv(path.blockZ[k], scale) - i0;
+                    int c = Math.floorDiv(path.blockX[k], scale) - j0;
+                    if (r < -32 || r >= H + 32 || c < -32 || c >= W + 32) continue;
+                    int rad = Math.round(
+                            LocalTerrainProvider.baseRiverHalfWidthBlocks(path.flow[k]) / scale);
+                    for (int dr = -rad; dr <= rad; dr++) {
+                        int rr = r + dr;
+                        if (rr < 0 || rr >= H) continue;
+                        for (int dc = -rad; dc <= rad; dc++) {
+                            int cc = c + dc;
+                            if (cc < 0 || cc >= W) continue;
+                            if (dr * dr + dc * dc > rad * rad + 1) continue;
+                            int idx = rr * W + cc;
+                            rgba[0][idx] = pr; rgba[1][idx] = pg; rgba[2][idx] = pb;
+                        }
+                    }
+                }
             }
         }
     }
@@ -489,9 +507,7 @@ public final class ExplorerServer {
                     rgba[3][i] = 1f;
                 }
                 if (mode.equals("rivers")) {
-                    overlayRivers(rgba, elevFlat, climate, H, W,
-                            getFloat(q, "river_pct") == null ? 4f : getFloat(q, "river_pct"),
-                            getInt(q, "min_basin", 1500));
+                    overlayRivers(rgba, H, W, centerI - half, centerJ - half);
                 }
             }
 

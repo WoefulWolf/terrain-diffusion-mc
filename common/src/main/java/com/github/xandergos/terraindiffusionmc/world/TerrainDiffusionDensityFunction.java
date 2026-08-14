@@ -5,16 +5,27 @@ import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider;
 import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider.HeightmapData;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.util.KeyDispatchDataCodec;
+import net.minecraft.util.Mth;
 import net.minecraft.world.level.levelgen.DensityFunction;
 
 
 public class TerrainDiffusionDensityFunction implements DensityFunction {
+
+    // Depth below the local surface, not a flat 1/-1. Only the sign places blocks, so the
+    // surface is unchanged, but final_density's cave functions gate on depth: carving
+    // starts at 1.5625 and cheese caves ramp in by 2.34375, so 25 and 37 blocks down.
+    private static final double DEPTH_SCALE = 16.0;
+    private static final double DENSITY_LIMIT = 64.0;
 
     public static final MapCodec<TerrainDiffusionDensityFunction> CODEC =
             MapCodec.unit(TerrainDiffusionDensityFunction::new);
 
     public static final TerrainDiffusionDensityFunction INSTANCE =
             new TerrainDiffusionDensityFunction();
+
+    private static double densityAt(int y, int targetHeight) {
+        return Mth.clamp((targetHeight - y) / DEPTH_SCALE, -DENSITY_LIMIT, DENSITY_LIMIT);
+    }
 
     @Override
     public double compute(DensityFunction.FunctionContext pos) {
@@ -38,6 +49,7 @@ public class TerrainDiffusionDensityFunction implements DensityFunction {
                 .fetchHeightmap(blockStartZ, blockStartX, blockEndZ, blockEndX);
 
         if (data == null || data.heightmap == null) {
+            // Solid, but below the cave threshold, so a missing tile never carves.
             return 1.0;
         }
 
@@ -45,7 +57,7 @@ public class TerrainDiffusionDensityFunction implements DensityFunction {
         int localZ = Math.max(0, Math.min(data.height - 1, z - blockStartZ));
 
         int targetHeight = HeightConverter.convertToMinecraftHeight(data.heightmap[localZ][localX]);
-        return y < targetHeight ? 1.0 : -1.0;
+        return densityAt(y, targetHeight);
     }
 
     private static final class FillContext {
@@ -103,7 +115,7 @@ public class TerrainDiffusionDensityFunction implements DensityFunction {
 
             int targetHeight = HeightConverter
                 .convertToMinecraftHeight(data.heightmap[localZ][localX]);
-            densities[i] = y < targetHeight ? 1.0 : -1.0;
+            densities[i] = densityAt(y, targetHeight);
         }
     }
 
@@ -114,12 +126,12 @@ public class TerrainDiffusionDensityFunction implements DensityFunction {
 
     @Override
     public double minValue() {
-        return -1;
+        return -DENSITY_LIMIT;
     }
 
     @Override
     public double maxValue() {
-        return 1;
+        return DENSITY_LIMIT;
     }
 
     @Override

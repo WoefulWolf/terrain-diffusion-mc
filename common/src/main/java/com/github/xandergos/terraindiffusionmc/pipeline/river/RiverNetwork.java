@@ -55,7 +55,95 @@ public final class RiverNetwork {
             if (d.ocean[i] || d.basinOutflow[i] < minBasinOutflow) continue;
             keep[i] = d.discharge[i] >= d.basinOutflow[i] * stemFraction;
         }
+        return fromKept(d, keep, n);
+    }
 
+    /** 8-neighbour offsets, for walking upstream. */
+    private static final int[] DR = {0, 1, 1, 1, 0, -1, -1, -1};
+    private static final int[] DC = {1, 1, 0, -1, -1, -1, 0, 1};
+
+    /**
+     * Keeps every reach carrying at least {@code minDischarge}, judged in absolute terms
+     * rather than against its basin.
+     *
+     * <p>Preferred when the analysis window may cut a catchment in half. D8 directions are
+     * local, so two windows always agree on where the channels run; only the accumulated
+     * total differs. An absolute cutoff therefore disagrees only near the threshold, at
+     * headwater tips, instead of shifting an entire basin's network.
+     */
+    public static List<Reach> extractAbove(CoarseHydrology.Drainage d, float minDischarge) {
+        int n = d.discharge.length;
+        boolean[] keep = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            keep[i] = !d.ocean[i] && d.discharge[i] >= minDischarge;
+        }
+        return fromKept(d, keep, n);
+    }
+
+    /**
+     * Keeps only channels that somewhere reach {@code minDischarge}, then walks each kept
+     * headwater upstream along its largest inflow while the flow stays at least
+     * {@code headwaterMin}.
+     *
+     * <p>A single threshold cannot make rivers long: high enough to be rare, it births
+     * every river far downhill; low enough to start high, it webs the map with brooks.
+     * Selecting rivers by the size they eventually reach and then tracing each back up its
+     * main stem gives few rivers that still begin high on the hillsides, growing over
+     * their whole run instead of arriving fully sized.
+     *
+     * <p>Edge-fed channels qualify at {@code edgeFedMin} instead: their discharge is only
+     * a lower bound, since the window cannot see what drains in across its border. Judged
+     * at full strength, a river whose upper catchment lies in the neighbouring window is
+     * dropped by the window that owns its mouth, and ends dead just short of the sea.
+     *
+     * <p>{@code headwaterMin} is per cell, so where a spring may sit is the terrain's
+     * choice: a low floor on high wet ground climbs sources into the mountains, a high
+     * floor on flat or dry ground makes a channel earn real size before it may exist
+     * there, so rivers cross such country without appearing to begin in it.
+     */
+    public static List<Reach> extractMainRivers(CoarseHydrology.Drainage d, float minDischarge,
+                                                float edgeFedMin, float[] headwaterMin) {
+        int n = d.discharge.length;
+        int h = d.height, w = d.width;
+        boolean[] keep = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            float min = d.edgeFed[i] ? edgeFedMin : minDischarge;
+            keep[i] = !d.ocean[i] && d.discharge[i] >= min;
+        }
+
+        boolean[] hasKeptUpstream = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            if (!keep[i]) continue;
+            int to = d.downstream[i];
+            if (to >= 0 && keep[to]) hasKeptUpstream[to] = true;
+        }
+
+        for (int i = 0; i < n; i++) {
+            if (!keep[i] || hasKeptUpstream[i]) continue;
+            int cur = i;
+            while (true) {
+                int r = cur / w, c = cur - r * w;
+                int best = -1;
+                float bestFlow = 0f;
+                for (int dir = 0; dir < 8; dir++) {
+                    int nr = r + DR[dir], nc = c + DC[dir];
+                    if (nr < 0 || nr >= h || nc < 0 || nc >= w) continue;
+                    int ni = nr * w + nc;
+                    if (d.ocean[ni] || keep[ni] || d.downstream[ni] != cur) continue;
+                    if (d.discharge[ni] >= headwaterMin[ni] && d.discharge[ni] > bestFlow) {
+                        bestFlow = d.discharge[ni];
+                        best = ni;
+                    }
+                }
+                if (best < 0) break;
+                keep[best] = true;
+                cur = best;
+            }
+        }
+        return fromKept(d, keep, n);
+    }
+
+    private static List<Reach> fromKept(CoarseHydrology.Drainage d, boolean[] keep, int n) {
         // Discharge only grows downstream, so the kept cells already form subtrees rooted
         // at their outlets; no connectivity repair is needed.
         int[] order = strahler(d, keep, n);

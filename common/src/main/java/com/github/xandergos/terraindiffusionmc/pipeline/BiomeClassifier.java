@@ -50,6 +50,10 @@ public final class BiomeClassifier {
     static final short DEEP_LUKEWARM_OCEAN = 43, DEEP_OCEAN = 45, DEEP_COLD_OCEAN = 47;
     static final short DEEP_FROZEN_OCEAN = 49;
 
+    // Stamped by RiverCarver after classification rather than by any rule here, since a
+    // river is decided by where water routes, not by the climate of the cell it crosses.
+    public static final short RIVER = 36, FROZEN_RIVER = 37;
+
     // Thresholds separating each variant from its parent biome. All empirical.
     private static final float DEEP_OCEAN_DEPTH_M = -1800f;
     private static final float JAGGED_PEAKS_MIN_ALT_M = 3200f;

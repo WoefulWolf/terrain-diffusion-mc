@@ -22,10 +22,10 @@ public final class CoarseHydrology {
     private static final float[] DIST = {1, SQRT2, 1, SQRT2, 1, SQRT2, 1, SQRT2};
 
     /**
-     * Raised on each fill step so filled flats keep a downhill gradient. Without it D8 has
-     * no defined direction across a filled depression and drainage stalls there.
+     * Per-step tilt applied across a filled flat. Small enough not to disturb real relief,
+     * large enough that D8 has a direction to follow.
      */
-    private static final float FILL_EPSILON = 1e-3f;
+    private static final float FLAT_EPSILON = 1e-4f;
 
     /** A cell counts as lake bed once the fill raised it this far above the real surface. */
     private static final float LAKE_MIN_DEPTH_M = 1.0f;
@@ -48,13 +48,20 @@ public final class CoarseHydrology {
         public final boolean[] ocean;
         /** Cells the fill raised appreciably: a basin that ponds water. */
         public final boolean[] lake;
+        /**
+         * Cells whose upstream network touches the window border. Their discharge is only
+         * a lower bound: the window cannot see inflow from outside, so whatever drains in
+         * across the border is missing from the count.
+         */
+        public final boolean[] edgeFed;
         /** Index of the cell this one ultimately drains through, or -1 for ocean. */
         public final int[] basin;
         /** Discharge at this cell's basin outlet, i.e. everything that basin carries. */
         public final float[] basinOutflow;
 
         Drainage(int height, int width, float[] filled, int[] downstream, float[] discharge,
-                 boolean[] ocean, boolean[] lake, int[] basin, float[] basinOutflow) {
+                 boolean[] ocean, boolean[] lake, boolean[] edgeFed,
+                 int[] basin, float[] basinOutflow) {
             this.height = height;
             this.width = width;
             this.filled = filled;
@@ -62,6 +69,7 @@ public final class CoarseHydrology {
             this.discharge = discharge;
             this.ocean = ocean;
             this.lake = lake;
+            this.edgeFed = edgeFed;
             this.basin = basin;
             this.basinOutflow = basinOutflow;
         }
@@ -90,6 +98,16 @@ public final class CoarseHydrology {
      */
     public static Drainage analyse(float[] elev, float[] precip, int height, int width,
                                    int minLakeCells) {
+        return analyse(elev, precip, height, width, minLakeCells, LAKE_MIN_DEPTH_M);
+    }
+
+    /**
+     * @param minLakeDepth metres the fill must have raised a cell for it to count as lake
+     *                     bed. Callers that put water in lakes pass the depth below which a
+     *                     lake could not visibly hold any, so shallow basins stay channels.
+     */
+    public static Drainage analyse(float[] elev, float[] precip, int height, int width,
+                                   int minLakeCells, float minLakeDepth) {
         int n = height * width;
         boolean[] ocean = new boolean[n];
         for (int i = 0; i < n; i++) {
@@ -100,12 +118,16 @@ public final class CoarseHydrology {
 
         boolean[] lake = new boolean[n];
         for (int i = 0; i < n; i++) {
-            lake[i] = !ocean[i] && filled[i] - elev[i] >= LAKE_MIN_DEPTH_M;
+            lake[i] = !ocean[i] && filled[i] - elev[i] >= minLakeDepth;
         }
         if (minLakeCells > 1) dropSmallPonds(lake, height, width, minLakeCells);
 
+        resolveFlats(filled, ocean, height, width);
+
         int[] downstream = routeD8(filled, ocean, height, width);
-        float[] discharge = accumulate(filled, precip, downstream, ocean, n);
+        downstream = repairInteriorSinks(filled, ocean, downstream, height, width);
+        boolean[] edgeFed = new boolean[n];
+        float[] discharge = accumulate(filled, precip, downstream, ocean, height, width, edgeFed);
 
         int[] basin = labelBasins(downstream, ocean, n);
         float[] basinOutflow = new float[n];
@@ -114,7 +136,7 @@ public final class CoarseHydrology {
         }
 
         return new Drainage(height, width, filled, downstream, discharge, ocean, lake,
-                basin, basinOutflow);
+                edgeFed, basin, basinOutflow);
     }
 
     /**
@@ -189,9 +211,11 @@ public final class CoarseHydrology {
                 if (queued[ni]) continue;
 
                 float ne = safeElev(elev[ni]);
-                // Raise anything at or below the spill level just above it, so the filled
-                // basin still slopes towards its outlet.
-                filled[ni] = ne <= z ? z + FILL_EPSILON : ne;
+                // Raise anything at or below the spill level to it exactly, leaving a true
+                // flat. Tilting here instead would slope every flat away from the flood
+                // seed, and D8 would then send a whole flat the same way, as parallel
+                // lines. resolveFlats gives them a gradient that converges instead.
+                filled[ni] = Math.max(ne, z);
                 queued[ni] = true;
                 open.push(packKey(filled[ni], ni));
             }
@@ -242,6 +266,136 @@ public final class CoarseHydrology {
         }
     }
 
+    /**
+     * Tilts filled flats so flow converges rather than running in parallel, after
+     * Garbrecht and Martz.
+     *
+     * <p>Two distances are measured across each flat: how far a cell is from an outlet,
+     * and how far it is from the higher ground feeding the flat. Combining them drains a
+     * flat toward its outlet while still pushing away from the slopes above it, which is
+     * what makes channels join up instead of marching side by side.
+     */
+    private static void resolveFlats(float[] filled, boolean[] ocean, int height, int width) {
+        int n = height * width;
+        boolean[] flat = new boolean[n];
+        int flatCount = 0;
+
+        for (int r = 0; r < height; r++) {
+            for (int c = 0; c < width; c++) {
+                int i = r * width + c;
+                if (ocean[i]) continue;
+                boolean canDrain = false;
+                for (int d = 0; d < 8 && !canDrain; d++) {
+                    int nr = r + DR[d], nc = c + DC[d];
+                    if (nr < 0 || nr >= height || nc < 0 || nc >= width) continue;
+                    int ni = nr * width + nc;
+                    if (ocean[ni] || filled[ni] < filled[i]) canDrain = true;
+                }
+                if (!canDrain) {
+                    flat[i] = true;
+                    flatCount++;
+                }
+            }
+        }
+        if (flatCount == 0) return;
+
+        int[] toOutlet = bfsOverFlats(filled, ocean, flat, height, width, true);
+        int[] fromHigh = bfsOverFlats(filled, ocean, flat, height, width, false);
+
+        int deepest = 0;
+        for (int i = 0; i < n; i++) {
+            if (flat[i] && fromHigh[i] != Integer.MAX_VALUE) deepest = Math.max(deepest, fromHigh[i]);
+        }
+
+        for (int i = 0; i < n; i++) {
+            if (!flat[i]) continue;
+            int outlet = toOutlet[i] == Integer.MAX_VALUE ? 0 : toOutlet[i];
+            int high = fromHigh[i] == Integer.MAX_VALUE ? deepest : fromHigh[i];
+            filled[i] += (2 * outlet + (deepest - high)) * FLAT_EPSILON;
+        }
+    }
+
+    /**
+     * Breadth-first distance across flat cells, seeded either from cells that touch a
+     * drainable neighbour or from cells that touch higher ground.
+     */
+    private static int[] bfsOverFlats(float[] filled, boolean[] ocean, boolean[] flat,
+                                      int height, int width, boolean fromOutlets) {
+        int n = height * width;
+        int[] dist = new int[n];
+        Arrays.fill(dist, Integer.MAX_VALUE);
+        int[] queue = new int[n];
+        int head = 0, tail = 0;
+
+        for (int r = 0; r < height; r++) {
+            for (int c = 0; c < width; c++) {
+                int i = r * width + c;
+                if (!flat[i]) continue;
+                for (int d = 0; d < 8; d++) {
+                    int nr = r + DR[d], nc = c + DC[d];
+                    if (nr < 0 || nr >= height || nc < 0 || nc >= width) continue;
+                    int ni = nr * width + nc;
+                    boolean seed = fromOutlets
+                            ? (!flat[ni] && (ocean[ni] || filled[ni] <= filled[i]))
+                            : (!flat[ni] && filled[ni] > filled[i]);
+                    if (seed) {
+                        dist[i] = 0;
+                        queue[tail++] = i;
+                        break;
+                    }
+                }
+            }
+        }
+
+        while (head < tail) {
+            int cur = queue[head++];
+            int r = cur / width, c = cur - r * width;
+            for (int d = 0; d < 8; d++) {
+                int nr = r + DR[d], nc = c + DC[d];
+                if (nr < 0 || nr >= height || nc < 0 || nc >= width) continue;
+                int ni = nr * width + nc;
+                if (!flat[ni] || dist[ni] != Integer.MAX_VALUE) continue;
+                dist[ni] = dist[cur] + 1;
+                queue[tail++] = ni;
+            }
+        }
+        return dist;
+    }
+
+    /**
+     * Raises interior sinks until every land cell drains.
+     *
+     * <p>The flat tilt is not bounded by the surrounding terrain, so it can lift a
+     * resolved flat above a neighbour that drained into it by a hair. That neighbour
+     * becomes a local minimum the fill is supposed to guarantee away: a river walking in
+     * ends mid-plain, and its discharge vanishes from everything downstream. Window-edge
+     * cells keep their -1, since leaving the window is a legitimate exit.
+     */
+    private static int[] repairInteriorSinks(float[] filled, boolean[] ocean,
+                                             int[] downstream, int height, int width) {
+        for (int pass = 0; pass < 8; pass++) {
+            boolean repaired = false;
+            for (int r = 1; r < height - 1; r++) {
+                for (int c = 1; c < width - 1; c++) {
+                    int i = r * width + c;
+                    if (ocean[i] || downstream[i] >= 0) continue;
+                    float minN = Float.MAX_VALUE;
+                    for (int d = 0; d < 8; d++) {
+                        int ni = (r + DR[d]) * width + (c + DC[d]);
+                        if (!ocean[ni]) minN = Math.min(minN, filled[ni]);
+                    }
+                    if (minN == Float.MAX_VALUE) continue;
+                    filled[i] = minN + FLAT_EPSILON;
+                    repaired = true;
+                }
+            }
+            if (!repaired) break;
+            // A raise can strand a former inflow, so re-route and sweep again.
+            downstream = routeD8(filled, ocean, height, width);
+        }
+        return downstream;
+    }
+
     /** Steepest-descent D8 over the filled surface. Ocean cells terminate flow. */
     private static int[] routeD8(float[] filled, boolean[] ocean, int height, int width) {
         int[] downstream = new int[height * width];
@@ -288,15 +442,23 @@ public final class CoarseHydrology {
      *
      * <p>Seeding with rainfall rather than a unit per cell makes this a discharge proxy,
      * so an arid catchment accumulates little however large it is.
+     *
+     * <p>The same pass marks edge-fed cells: the window border seeds the flag, and it
+     * rides the flow downstream, so anything downstream of the border knows its own
+     * discharge is undercounted.
      */
     private static float[] accumulate(float[] filled, float[] precip, int[] downstream,
-                                      boolean[] ocean, int n) {
+                                      boolean[] ocean, int height, int width,
+                                      boolean[] edgeFed) {
+        int n = height * width;
         float[] discharge = new float[n];
         long[] order = new long[n];
         int count = 0;
 
         for (int i = 0; i < n; i++) {
             if (ocean[i]) continue;
+            int r = i / width, c = i - r * width;
+            edgeFed[i] = r == 0 || c == 0 || r == height - 1 || c == width - 1;
             discharge[i] = precip == null ? 1f : Math.max(0f, precip[i]);
             order[count++] = packKey(filled[i], i);
         }
@@ -306,7 +468,10 @@ public final class CoarseHydrology {
         for (int k = count - 1; k >= 0; k--) {
             int i = (int) (order[k] & 0xFFFFFFFFL);
             int to = downstream[i];
-            if (to >= 0 && !ocean[to]) discharge[to] += discharge[i];
+            if (to >= 0 && !ocean[to]) {
+                discharge[to] += discharge[i];
+                if (edgeFed[i]) edgeFed[to] = true;
+            }
         }
         return discharge;
     }

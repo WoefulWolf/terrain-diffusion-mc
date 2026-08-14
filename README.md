@@ -10,8 +10,8 @@ Forked from [xandergos/terrain-diffusion-mc](https://github.com/xandergos/terrai
 
 |                                       | before   | now      |
 |---------------------------------------|----------|----------|
-| Vanilla overworld biomes generated    | 20 of 53 | 46 of 53 |
-| Overworld structures able to generate | 24       | 27       |
+| Vanilla overworld biomes generated    | 20 of 53 | 49 of 53 |
+| Overworld structures able to generate | 24       | 29       |
 
 The 24 new biomes are derived from climate signals the classifier already computed, so no model changes were needed:
 
@@ -22,6 +22,12 @@ The 24 new biomes are derived from climate signals the classifier already comput
 - **Caves** — `dripstone_caves`, `lush_caves`, `deep_dark`, placed by depth below the local surface and biased by the biome above, so lush caves favour wet regions and dripstone dry ones
 
 `badlands` and `meadow` now generate as well, and `river` / `frozen_river` come with the river system below.
+
+### Shorelines
+
+Coasts are read from the terrain the way real ones work: where the land meets the ocean on a gentle gradient, waves can deposit sediment, so a `beach` forms — wide on flat coasts, a thin ribbon on steeper ones, `snowy_beach` where the country behind it is snowy. Steep coastal faces become rocky `stony_shore` headlands instead, and genuine sea cliffs stay cliffs. Swamp and mangrove coasts keep their muddy edges, as they should. Ocean floors got matching attention — sand under warm and temperate water, gravel under cold and deep.
+
+Mangroves themselves are held to real ecology rather than vanilla's rules: they are intertidal, so `mangrove_swamp` only grows where hot, soaked land sits nearly flat within a couple of metres of the sea and close to the coast. The same country further inland is rainforest, so it generates as jungle instead.
 
 ### Cave systems
 
@@ -42,7 +48,7 @@ Rivers are configured per world at creation — see [Per-world settings](#per-wo
 
 ### Structures
 
-`ancient_city`, `ocean_monument` and `woodland_mansion` now have biomes to generate in, which brings with them sculk, the warden, echo shards, Swift Sneak, sponge, prismarine, elder guardians and dark oak. `buried_treasure` and `shipwreck_beached` are still waiting on beaches.
+`ancient_city`, `ocean_monument` and `woodland_mansion` now have biomes to generate in, which brings with them sculk, the warden, echo shards, Swift Sneak, sponge, prismarine, elder guardians and dark oak. Beaches unlock `buried_treasure` and `shipwreck_beached` on top of that.
 
 The three custom biomes — `forest_sparse`, `taiga_sparse` and `snowy_taiga_sparse` — now carry the same biome tags as their vanilla counterparts, so structures generate in them and modded content keyed off `#minecraft:is_*` or `#c:is_*` applies to them too.
 
@@ -52,7 +58,7 @@ Every biome added here is a vanilla biome key rather than a new namespaced one, 
 
 ### Not done yet
 
-Beaches and the shoreline biomes are still missing, along with `cherry_grove`, `flower_forest`, `sunflower_plains` and `mushroom_fields`.
+`cherry_grove`, `flower_forest`, `sunflower_plains` and `mushroom_fields` are still missing.
 
 ### GPU stability
 

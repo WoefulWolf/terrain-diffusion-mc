@@ -54,6 +54,10 @@ public final class BiomeClassifier {
     // river is decided by where water routes, not by the climate of the cell it crosses.
     public static final short RIVER = 36, FROZEN_RIVER = 37;
 
+    // Stamped by applyShoreline, which needs distance to the ocean and so cannot run
+    // inside the per-pixel loop.
+    public static final short BEACH = 38, SNOWY_BEACH = 39, STONY_SHORE = 40;
+
     // Thresholds separating each variant from its parent biome. All empirical.
     private static final float DEEP_OCEAN_DEPTH_M = -1800f;
     private static final float JAGGED_PEAKS_MIN_ALT_M = 3200f;
@@ -78,10 +82,13 @@ public final class BiomeClassifier {
      * @param H          height
      * @param W          width
      * @param pixelSizeM physical size of one pixel in meters
+     * @param coastDist  distance to the nearest ocean pixel in blocks, (H, W) row-major,
+     *                   from {@link #coastDistance}; null when no ocean is in range
      * @return short array (H, W) with biome IDs
      */
     public static short[] classify(float[] elev, float[] climate, int i0, int j0,
-                                    float[] elevPadded, int H, int W, float pixelSizeM) {
+                                    float[] elevPadded, int H, int W, float pixelSizeM,
+                                    float[] coastDist) {
         short[] out = new short[H * W];
         for (int i = 0; i < H * W; i++) out[i] = PLAINS;
 
@@ -260,7 +267,9 @@ public final class BiomeClassifier {
                         else if (temperate && temp < BIRCH_FOREST_MAX_TEMP_C) biome = BIRCH_FOREST;
                         else biome = FOREST;
                     } else { // rainforest
-                        if (hot && lowland) biome = MANGROVE_SWAMP;
+                        if (hot && lowland && isMangroveCoast(coastDist, idx, altM, slope, j0 + c, i0 + r)) {
+                            biome = MANGROVE_SWAMP;
+                        }
                         else if (hot || (warm && temp >= 18f && tStd < 5f)) {
                             biome = precip > BAMBOO_JUNGLE_MIN_PRECIP_MM ? BAMBOO_JUNGLE : JUNGLE;
                         }
@@ -280,6 +289,198 @@ public final class BiomeClassifier {
             }
         }
         return out;
+    }
+
+    // Shoreline pass. Beaches form where waves can deposit sediment, so a gentle coast
+    // near sea level becomes beach, a steep coastal face becomes stony shore, and a
+    // proper cliff stays whatever the cliff already was. Swamps and mangroves keep
+    // their muddy coasts. Width falls out of the terrain: the beach reaches inland
+    // until the ground climbs a couple of blocks, so flat coasts get wide beaches and
+    // steep ones get slivers.
+    //
+    // Callers must supply elevation with SHORE_PAD extra blocks on every side so the
+    // ocean-distance transform sees the same neighbourhood from any tile. Sized to the
+    // mangrove belt, the widest consumer of the distance field.
+    public static final int SHORE_PAD = 48;
+
+    // No shoreline width is a single number. Each is a base plus a bonus earned by
+    // flatness plus slow noise, so ribbons breathe along the coast instead of tracing
+    // a constant offset. Every base+bonus+wobble sum must stay at or below SHORE_PAD
+    // or tiles stop agreeing at their seams.
+    private static final float BEACH_DIST_BASE = 20f;
+    private static final float BEACH_DIST_FLAT_BONUS = 14f;
+    private static final float BEACH_DIST_WOBBLE = 6f;
+    private static final float BEACH_TOP_BLOCKS = 2.5f;
+    private static final float BEACH_TOP_FLAT_BONUS = 1.5f;
+    private static final float BEACH_TOP_WOBBLE_BLOCKS = 1.2f;
+    private static final float STONY_DIST_BASE = 12f;
+    private static final float STONY_DIST_WOBBLE = 4f;
+    private static final float STONY_TOP_BLOCKS = 8f;
+    private static final float STONY_MIN_SLOPE = 0.4f;
+
+    // Mangroves are intertidal: hot, soaked, nearly flat, barely above the sea, and
+    // within reach of it. The flatter the tidal flat, the deeper the belt. Hot wetlands
+    // that miss these gates read as jungle, which is what an inland tropical swamp
+    // forest looks like anyway.
+    private static final float MANGROVE_BELT_BASE = 24f;
+    private static final float MANGROVE_BELT_FLAT_BONUS = 12f;
+    private static final float MANGROVE_BELT_WOBBLE = 12f;
+    private static final float MANGROVE_MAX_ALT_M = 30f;
+    private static final float MANGROVE_ALT_WOBBLE = 0.3f;
+    private static final float MANGROVE_MAX_SLOPE = 0.25f;
+
+    // Two scales on purpose: WIDTH_NOISE swells and pinches ribbons over headland-and-
+    // bay distances, SHORE_NOISE roughens the inland edge at dune scale.
+    private static final FastNoiseLite WIDTH_NOISE = makeFnl(24601, 1f / 180f, 2, 2f, 0.5f);
+    private static final FastNoiseLite SHORE_NOISE = makeFnl(9182, 1f / 40f, 2, 2f, 0.5f);
+
+    /**
+     * Distance in blocks from every core pixel to the nearest ocean pixel, computed on
+     * the padded grid so tiles agree. Values beyond {@code pad} are window-dependent and
+     * must not be thresholded against.
+     *
+     * @param elevWide elevation with {@code pad} extra pixels on every side,
+     *                 (H+2*pad, W+2*pad) row-major
+     * @return (H, W) row-major distances, or null when the window has no ocean at all
+     */
+    public static float[] coastDistance(float[] elevWide, int pad, int H, int W) {
+        int wideW = W + 2 * pad;
+        int wideH = H + 2 * pad;
+
+        float[] dist = new float[wideH * wideW];
+        boolean anyOcean = false;
+        for (int i = 0; i < dist.length; i++) {
+            if (elevWide[i] < 0f) {
+                dist[i] = 0f;
+                anyOcean = true;
+            } else {
+                dist[i] = Float.MAX_VALUE;
+            }
+        }
+        if (!anyOcean) return null;
+        chamferDistance(dist, wideH, wideW);
+
+        float[] core = new float[H * W];
+        for (int r = 0; r < H; r++)
+            System.arraycopy(dist, (r + pad) * wideW + pad, core, r * W, W);
+        return core;
+    }
+
+    private static boolean isMangroveCoast(float[] coastDist, int idx, float altM,
+                                           float slope, float nx, float ny) {
+        if (coastDist == null || slope > MANGROVE_MAX_SLOPE) return false;
+        float flat = 1f - slope / MANGROVE_MAX_SLOPE;
+        float n = WIDTH_NOISE.GetNoise(nx, ny);
+        float belt = MANGROVE_BELT_BASE + MANGROVE_BELT_FLAT_BONUS * flat + MANGROVE_BELT_WOBBLE * n;
+        return coastDist[idx] <= belt
+                && altM <= MANGROVE_MAX_ALT_M * (1f + MANGROVE_ALT_WOBBLE * n);
+    }
+
+    /**
+     * Overwrite coastal land pixels with beach / snowy_beach / stony_shore.
+     *
+     * @param biomes    classified ids, (H, W) row-major, mutated in place
+     * @param elev      elevation in metres, (H, W) row-major (pre-noise)
+     * @param elevWide  elevation with {@code pad} extra pixels on every side,
+     *                  (H+2*pad, W+2*pad) row-major, same source as {@code elev}
+     * @param pad       halo width in pixels, at least {@link #SHORE_PAD}
+     * @param coastDist result of {@link #coastDistance} for the same window; null skips
+     */
+    public static void applyShoreline(short[] biomes, float[] elev, float[] elevWide, int pad,
+                                      float[] coastDist, int i0, int j0, int H, int W, float pixelSizeM) {
+        if (coastDist == null) return;
+        int wideW = W + 2 * pad;
+
+        for (int r = 0; r < H; r++) {
+            for (int c = 0; c < W; c++) {
+                int idx = r * W + c;
+                if (elev[idx] < 0f) continue;
+                short current = biomes[idx];
+                if (current == SWAMP || current == MANGROVE_SWAMP) continue;
+
+                int wi = (r + pad) * wideW + (c + pad);
+                float d = coastDist[idx];
+                if (d > BEACH_DIST_BASE + BEACH_DIST_FLAT_BONUS + BEACH_DIST_WOBBLE) continue;
+
+                // Vertical and horizontal metres per block are both pixelSizeM, so this
+                // is blocks risen per block travelled regardless of world scale.
+                float dx = (elevWide[wi + 1] - elevWide[wi - 1]) * 0.5f;
+                float dy = (elevWide[wi + wideW] - elevWide[wi - wideW]) * 0.5f;
+                float slope = (float) Math.sqrt(dx * dx + dy * dy) / pixelSizeM;
+
+                float elevBlocks = elev[idx] / pixelSizeM;
+                float wn = WIDTH_NOISE.GetNoise(j0 + c, i0 + r);
+                if (slope >= STONY_MIN_SLOPE) {
+                    if (d <= STONY_DIST_BASE + STONY_DIST_WOBBLE * wn
+                            && elevBlocks <= STONY_TOP_BLOCKS) {
+                        biomes[idx] = STONY_SHORE;
+                    }
+                    continue;
+                }
+
+                // Flat coasts earn width and a little extra climb; steeper sandy coasts
+                // stay thin ribbons. The slow noise makes the ribbon swell and pinch.
+                float flat = 1f - slope / STONY_MIN_SLOPE;
+                if (d > BEACH_DIST_BASE + BEACH_DIST_FLAT_BONUS * flat + BEACH_DIST_WOBBLE * wn) continue;
+
+                float top = BEACH_TOP_BLOCKS + BEACH_TOP_FLAT_BONUS * flat
+                        + BEACH_TOP_WOBBLE_BLOCKS * SHORE_NOISE.GetNoise(j0 + c, i0 + r);
+                if (elevBlocks <= top) {
+                    biomes[idx] = isSnowySurface(current) ? SNOWY_BEACH : BEACH;
+                }
+            }
+        }
+    }
+
+    // The replaced biome already went through the full snow classification, so "was it
+    // a snowy biome" keeps the beach consistent with its hinterland for free.
+    private static boolean isSnowySurface(short id) {
+        switch (id) {
+            case SNOWY_PLAINS:
+            case ICE_SPIKES:
+            case SNOWY_TAIGA:
+            case SNOWY_TAIGA_SPARSE:
+            case SNOWY_SLOPES:
+            case FROZEN_PEAKS:
+            case JAGGED_PEAKS:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * In-place two-pass chamfer distance transform. Seeds are cells already at 0;
+     * output is distance in pixels (diagonal steps cost sqrt 2).
+     */
+    private static void chamferDistance(float[] d, int H, int W) {
+        final float ORTH = 1f, DIAG = 1.41421356f;
+        for (int r = 0; r < H; r++) {
+            for (int c = 0; c < W; c++) {
+                int i = r * W + c;
+                float v = d[i];
+                if (c > 0) v = Math.min(v, d[i - 1] + ORTH);
+                if (r > 0) {
+                    v = Math.min(v, d[i - W] + ORTH);
+                    if (c > 0) v = Math.min(v, d[i - W - 1] + DIAG);
+                    if (c < W - 1) v = Math.min(v, d[i - W + 1] + DIAG);
+                }
+                d[i] = v;
+            }
+        }
+        for (int r = H - 1; r >= 0; r--) {
+            for (int c = W - 1; c >= 0; c--) {
+                int i = r * W + c;
+                float v = d[i];
+                if (c < W - 1) v = Math.min(v, d[i + 1] + ORTH);
+                if (r < H - 1) {
+                    v = Math.min(v, d[i + W] + ORTH);
+                    if (c < W - 1) v = Math.min(v, d[i + W + 1] + DIAG);
+                    if (c > 0) v = Math.min(v, d[i + W - 1] + DIAG);
+                }
+                d[i] = v;
+            }
+        }
     }
 
     private static float[] computeSlopeRatio(float[] elevPadded, int H, int W, float pixelSizeM) {

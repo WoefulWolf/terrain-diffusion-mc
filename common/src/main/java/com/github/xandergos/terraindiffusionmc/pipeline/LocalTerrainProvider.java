@@ -277,12 +277,18 @@ public final class LocalTerrainProvider {
     private HeightmapData handle1x(int i1, int j1, int i2, int j2) {
         int H = i2 - i1, W = j2 - j1;
 
-        float[] elevPadded = pipeline.get(i1 - 1, j1 - 1, i2 + 1, j2 + 1, false)[0];
+        // The shoreline pass wants a wide halo; the classifier's 1-pixel slope pad is
+        // cropped out of the same fetch.
+        int shorePad = BiomeClassifier.SHORE_PAD;
+        float[] elevWide = pipeline.get(i1 - shorePad, j1 - shorePad, i2 + shorePad, j2 + shorePad, false)[0];
+        float[] elevPadded = cropFlatFromFlat(elevWide, shorePad - 1, shorePad - 1, H + 2, W + 2, W + 2 * shorePad);
         float[][] out = pipeline.get(i1, j1, i2, j2, true);
         float[] elevFlat = out[0];
         float[] climate  = out[1];
 
-        short[] biomeFlat = BiomeClassifier.classify(elevFlat, climate, i1, j1, elevPadded, H, W, NATIVE_RESOLUTION);
+        float[] coastDist = BiomeClassifier.coastDistance(elevWide, shorePad, H, W);
+        short[] biomeFlat = BiomeClassifier.classify(elevFlat, climate, i1, j1, elevPadded, H, W, NATIVE_RESOLUTION, coastDist);
+        BiomeClassifier.applyShoreline(biomeFlat, elevFlat, elevWide, shorePad, coastDist, i1, j1, H, W, NATIVE_RESOLUTION);
         float[] waterFlat = newWaterField(H * W);
         byte[] riverClassFlat = new byte[H * W];
         carveRivers(elevFlat, biomeFlat, climate, waterFlat, riverClassFlat, i1, j1, H, W, 1);
@@ -303,9 +309,11 @@ public final class LocalTerrainProvider {
         int i2n = -Math.floorDiv(-i2, scale);
         int j2n = -Math.floorDiv(-j2, scale);
 
-        // 2-pixel native padding (1 for bilinear + 1 for slope)
-        int i1p = i1n - 2, j1p = j1n - 2;
-        int i2p = i2n + 2, j2p = j2n + 2;
+        // Native padding: 2 pixels for bilinear + slope, plus enough to cover the
+        // shoreline pass's block-space halo after upsampling.
+        int padN = 2 + (BiomeClassifier.SHORE_PAD + scale - 1) / scale;
+        int i1p = i1n - padN, j1p = j1n - padN;
+        int i2p = i2n + padN, j2p = j2n + padN;
         int nH = i2p - i1p, nW = j2p - j1p;
 
         float[][] out = pipeline.get(i1p, j1p, i2p, j2p, true);
@@ -317,21 +325,26 @@ public final class LocalTerrainProvider {
         float[][] elevUp = LaplacianUtils.bilinearResize(elevNative2D, nH * scale, nW * scale);
 
         // Crop offsets in the upsampled array
-        int padUp   = 2 * scale;
+        int padUp   = padN * scale;
         int offsetI = i1 - i1n * scale;
         int offsetJ = j1 - j1n * scale;
         int cropI1  = padUp + offsetI;
         int cropJ1  = padUp + offsetJ;
 
+        int shorePad = BiomeClassifier.SHORE_PAD;
         float[] elevSmooth = cropFlat(elevUp, cropI1,     cropJ1,     H,   W,   nH * scale, nW * scale);
         float[] elevPadded = cropFlat(elevUp, cropI1 - 1, cropJ1 - 1, H+2, W+2, nH * scale, nW * scale);
+        float[] elevWide   = cropFlat(elevUp, cropI1 - shorePad, cropJ1 - shorePad,
+                H + 2 * shorePad, W + 2 * shorePad, nH * scale, nW * scale);
 
         // Upsample climate (4, nH, nW) → (4, H, W)
         float[] climate = upsampleClimate(climateNativeFlat, nH, nW, cropI1, cropJ1, H, W, scale, nH * scale, nW * scale);
 
         float[] elevOut = addElevationNoise(elevSmooth, elevPadded, i1, j1, H, W, pixelSizeM);
 
-        short[] biomeFlat = BiomeClassifier.classify(elevSmooth, climate, i1, j1, elevPadded, H, W, pixelSizeM);
+        float[] coastDist = BiomeClassifier.coastDistance(elevWide, shorePad, H, W);
+        short[] biomeFlat = BiomeClassifier.classify(elevSmooth, climate, i1, j1, elevPadded, H, W, pixelSizeM, coastDist);
+        BiomeClassifier.applyShoreline(biomeFlat, elevSmooth, elevWide, shorePad, coastDist, i1, j1, H, W, pixelSizeM);
         float[] waterFlat = newWaterField(H * W);
         byte[] riverClassFlat = new byte[H * W];
         carveRivers(elevOut, biomeFlat, climate, waterFlat, riverClassFlat, i1, j1, H, W, scale);
@@ -403,6 +416,13 @@ public final class LocalTerrainProvider {
                     result[ch * H * W + r * W + c] = chUp[cropI1 + r][cropJ1 + c];
         }
         return result;
+    }
+
+    private static float[] cropFlatFromFlat(float[] src, int r0, int c0, int H, int W, int srcW) {
+        float[] out = new float[H * W];
+        for (int r = 0; r < H; r++)
+            System.arraycopy(src, (r0 + r) * srcW + c0, out, r * W, W);
+        return out;
     }
 
     private static float[] cropFlat(float[][] src, int r0, int c0, int H, int W, int srcH, int srcW) {

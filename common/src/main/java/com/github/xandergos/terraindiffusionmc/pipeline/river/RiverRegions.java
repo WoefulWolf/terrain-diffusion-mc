@@ -269,7 +269,8 @@ public final class RiverRegions {
         }
 
         List<RiverNetwork.Reach> reaches = RiverNetwork.extractMainRivers(d,
-                params.mainChannelCells * norm, params.edgeFedCells() * norm, headwaterMin);
+                params.mainChannelCells * norm, params.edgeFedCells() * norm, headwaterMin,
+                params.headwaterCells * norm, i0, j0);
         List<RiverPath> paths = List.of();
         if (!reaches.isEmpty()) {
             boolean[] kept = new boolean[n];

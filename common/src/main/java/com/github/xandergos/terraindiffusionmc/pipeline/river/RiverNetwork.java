@@ -100,9 +100,18 @@ public final class RiverNetwork {
      * choice: a low floor on high wet ground climbs sources into the mountains, a high
      * floor on flat or dry ground makes a channel earn real size before it may exist
      * there, so rivers cross such country without appearing to begin in it.
+     *
+     * <p>That pricing has a cosmetic cost: where the floor is high, a qualifying river
+     * begins already carrying real flow, and appears out of the ground as a thick stump.
+     * A source that starts big therefore grows a few tendrils — short, budgeted walks
+     * further up its own drainage tree at a relaxed floor — so the stump dissolves into
+     * thin rivulets converging along their true valleys. {@code headwaterRef} is the
+     * unpriced spring floor the tendril thresholds are judged against, and {@code i0},
+     * {@code j0} anchor the budget jitter to world coordinates.
      */
     public static List<Reach> extractMainRivers(CoarseHydrology.Drainage d, float minDischarge,
-                                                float edgeFedMin, float[] headwaterMin) {
+                                                float edgeFedMin, float[] headwaterMin,
+                                                float headwaterRef, int i0, int j0) {
         int n = d.discharge.length;
         int h = d.height, w = d.width;
         boolean[] keep = new boolean[n];
@@ -139,8 +148,72 @@ public final class RiverNetwork {
                 keep[best] = true;
                 cur = best;
             }
+            if (d.discharge[cur] >= TENDRIL_STUB_FACTOR * headwaterRef) {
+                int r = cur / w, c = cur - r * w;
+                int budget = TENDRIL_BUDGET_BASE
+                        + worldHash(i0 + r, j0 + c) % TENDRIL_BUDGET_JITTER;
+                growTendrils(d, keep, cur, TENDRIL_FLOOR_FACTOR * headwaterRef,
+                        budget, true, i0, j0);
+            }
         }
         return fromKept(d, keep, n);
+    }
+
+    // A source only counts as a stump above this multiple of the unpriced floor, so tiny
+    // alpine springs stay exactly as they are. Tendrils then follow real inflows down to
+    // a fraction of that floor, with a jittered budget so no two are the same length.
+    private static final float TENDRIL_STUB_FACTOR = 2.5f;
+    private static final float TENDRIL_FLOOR_FACTOR = 0.15f;
+    private static final int TENDRIL_BUDGET_BASE = 28;
+    private static final int TENDRIL_BUDGET_JITTER = 21;
+
+    /**
+     * Walks upstream keeping thin feeders: the largest inflow continues this tendril,
+     * and now and then a second inflow forks off with half the remaining budget, so the
+     * feeders join the stem at staggered points instead of a single crow's foot.
+     */
+    private static void growTendrils(CoarseHydrology.Drainage d, boolean[] keep, int cur,
+                                     float floor, int budget, boolean allowFork,
+                                     int i0, int j0) {
+        int h = d.height, w = d.width;
+        while (budget-- > 0) {
+            int r = cur / w, c = cur - r * w;
+            int best = -1, second = -1;
+            float bestFlow = 0f, secondFlow = 0f;
+            for (int dir = 0; dir < 8; dir++) {
+                int nr = r + DR[dir], nc = c + DC[dir];
+                if (nr < 0 || nr >= h || nc < 0 || nc >= w) continue;
+                int ni = nr * w + nc;
+                if (d.ocean[ni] || keep[ni] || d.downstream[ni] != cur) continue;
+                float f = d.discharge[ni];
+                if (f < floor) continue;
+                if (f > bestFlow) {
+                    second = best;
+                    secondFlow = bestFlow;
+                    best = ni;
+                    bestFlow = f;
+                } else if (f > secondFlow) {
+                    second = ni;
+                    secondFlow = f;
+                }
+            }
+            if (best < 0) return;
+            keep[best] = true;
+            if (allowFork && second >= 0 && worldHash(i0 + r, j0 + c) % 2 == 0) {
+                keep[second] = true;
+                growTendrils(d, keep, second, floor, budget / 2, false, i0, j0);
+            }
+            cur = best;
+        }
+    }
+
+    /** Deterministic non-negative hash of a world cell, so jitter agrees across windows. */
+    private static int worldHash(int i, int j) {
+        int x = i * 0x9E3779B1 + j * 0x85EBCA77;
+        x ^= x >>> 15;
+        x *= 0x2C1B3C6D;
+        x ^= x >>> 12;
+        return x & 0x7FFFFFFF;
     }
 
     private static List<Reach> fromKept(CoarseHydrology.Drainage d, boolean[] keep, int n) {

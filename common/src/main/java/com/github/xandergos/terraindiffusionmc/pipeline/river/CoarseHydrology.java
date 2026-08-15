@@ -428,10 +428,10 @@ public final class CoarseHydrology {
                                        int[] seen, int[] queue, int stamp,
                                        boolean allowStuckEnd) {
         // Flood the pond: every interior cell effectively level with the sink, draining
-        // or not. The level cells that drain here drain INTO the sink, which is how it
-        // swallowed the river; they are rewired with everything else. Anything above the
-        // band is real terrain, anything below it is escape ground — both are candidate
-        // pour points, not members, which keeps the flood the size of the pond.
+        // or not. The level cells that do drain, drain into the sink — that is how it
+        // swallowed the river — so they are rewired with everything else. Anything above
+        // the band is real terrain, anything below it is escape ground; both are
+        // candidate pour points, not members, which keeps the flood the size of the pond.
         float bandLo = filled[start] - 4f * FLAT_EPSILON;
         float bandHi = filled[start] + BREACH_TOLERANCE;
         int head = 0, tail = 0;

@@ -518,6 +518,10 @@ public final class LocalTerrainProvider {
     private static final float SOURCE_FADE_MIN_FLOW = 3000f;
     private static final int SOURCE_FADE_MIN_BLOCKS = 16;
     private static final int SOURCE_FADE_MAX_BLOCKS = 96;
+    /** Width and depth a source begins at before its ramp; roughly a bubbling spring. */
+    private static final float SOURCE_TIP_HALF_BLOCKS = 0.6f;
+    private static final float SOURCE_TIP_DEPTH_BLOCKS = 0.9f;
+    private static final int SOURCE_RAMP_MIN_BLOCKS = 8;
 
     /**
      * Water-margin greening. Vegetation follows water it can actually reach, so a green
@@ -720,6 +724,21 @@ public final class LocalTerrainProvider {
                 }
             }
 
+            // Every source starts a spring's size and earns its width. The carve fade
+            // alone cannot do this: a half-strength cut of a wide disc is still wide and
+            // still wets, so a big start would surface at full width anyway. Springs that
+            // already begin near the tip size ramp as a no-op.
+            int rampLen = Math.min(len, Math.max(SOURCE_RAMP_MIN_BLOCKS,
+                    Math.min(SOURCE_FADE_MAX_BLOCKS, Math.round(6f * pHalf[0]))));
+            for (int k = 0; k < rampLen; k++) {
+                float p = k / (float) Math.max(1, rampLen - 1);
+                float g = p * p * (3f - 2f * p);
+                pHalf[k] = Math.min(pHalf[k],
+                        SOURCE_TIP_HALF_BLOCKS + (pHalf[k] - SOURCE_TIP_HALF_BLOCKS) * g);
+                pDepth[k] = Math.min(pDepth[k],
+                        SOURCE_TIP_DEPTH_BLOCKS + (pDepth[k] - SOURCE_TIP_DEPTH_BLOCKS) * g);
+            }
+
             if (path.flow[0] >= SOURCE_FADE_MIN_FLOW) {
                 int fadeLen = Math.min(len, Math.max(SOURCE_FADE_MIN_BLOCKS,
                         Math.min(SOURCE_FADE_MAX_BLOCKS, Math.round(6f * pHalf[0]))));
@@ -763,10 +782,8 @@ public final class LocalTerrainProvider {
                     // Taken from the drainage analysis rather than from this tile. That
                     // elevation already descends along the path and is shared by every tile
                     // the river crosses, so the water surface cannot step at a tile border.
-                    // Floored just above the sea: a lower course whose surface would dip
-                    // under sea level is tidewater, and without the floor every claim on a
-                    // low coastal flat is discarded as "the ocean's to fill" — the river
-                    // runs bone dry across its own delta.
+                    // The tidewater floor keeps low coastal claims above the level where
+                    // they would be discarded as the ocean's.
                     runSurf[count] = Math.max(path.ground[k] - freeboardMetres,
                             TIDEWATER_SURFACE_METRES);
                     count++;

@@ -79,7 +79,12 @@ public final class WorldScaleSettingsScreen extends Screen {
         this.addRenderableWidget(scaleTextField);
         this.setInitialFocus(scaleTextField);
 
-        addCenteredTextWidget(RIVER_LABEL_TEXT, centerX, centerY - 82, 0xFFFFFF);
+        // Rivers fill a block of fields on the left, caves theirs on the right, so the
+        // screen stays short enough to never need scrolling.
+        int riversCenter = centerX - 88;
+        int cavesCenter = centerX + 88;
+
+        addCenteredTextWidget(RIVER_LABEL_TEXT, riversCenter, centerY - 82, 0xFFFFFF);
 
         riverMode = WorldScaleSelectionState.getPendingRiverModeOrDefault();
         riverModeButton = Button.builder(riverModeLabel(), button -> {
@@ -87,13 +92,13 @@ public final class WorldScaleSettingsScreen extends Screen {
                     riverModeButton.setMessage(riverModeLabel());
                     riverModeButton.setTooltip(Tooltip.create(riverModeDescription()));
                 })
-                .bounds(centerX - BUTTON_WIDTH, centerY - 72, BUTTON_WIDTH * 2, BUTTON_HEIGHT)
+                .bounds(riversCenter - BUTTON_WIDTH, centerY - 72, BUTTON_WIDTH * 2, BUTTON_HEIGHT)
                 .build();
         riverModeButton.setTooltip(Tooltip.create(riverModeDescription()));
         this.addRenderableWidget(riverModeButton);
 
         RiverParameters p = WorldScaleSelectionState.getPendingRiverParametersOrDefault();
-        int left = centerX - 78, right = centerX + 6;
+        int left = riversCenter - 78, right = riversCenter + 6;
         riverRarityField = addLabeledField(left, centerY - 38, "Rarity", String.valueOf(p.mainChannelCells),
                 "How much land must drain together before a river forms at all. "
                         + "Higher: fewer, rarer rivers. Lower: rivers everywhere.");
@@ -126,26 +131,27 @@ public final class WorldScaleSettingsScreen extends Screen {
                 "How bumpy river and lake floors are, in blocks. Higher: underwater dunes and "
                         + "hollows. Lower: flat floors.");
 
-        addCenteredTextWidget(CAVE_LABEL_TEXT, centerX, centerY + 104, 0xFFFFFF);
+        addCenteredTextWidget(CAVE_LABEL_TEXT, cavesCenter, centerY - 82, 0xFFFFFF);
 
         CaveParameters c = WorldScaleSelectionState.getPendingCaveParametersOrDefault();
-        caveSmallSealField = addLabeledField(left, centerY + 124, "Tunnel cover", String.valueOf(c.smallSealBlocks),
+        int cavesLeft = cavesCenter - 78, cavesRight = cavesCenter + 6;
+        caveSmallSealField = addLabeledField(cavesLeft, centerY - 38, "Tunnel cover", String.valueOf(c.smallSealBlocks),
                 "How deep small cave tunnels and ravines must stay below gentle ground, in "
                         + "blocks. They still surface in craggy or rocky country. "
                         + "0: they may break the surface anywhere, like vanilla.");
-        caveLargeSealField = addLabeledField(right, centerY + 124, "Cavern cover", String.valueOf(c.largeSealBlocks),
+        caveLargeSealField = addLabeledField(cavesRight, centerY - 38, "Cavern cover", String.valueOf(c.largeSealBlocks),
                 "How deep big caverns and their wide mouths must stay below the surface, in "
                         + "blocks. Rare mouths still open in crevasse, karst and canyon country. "
                         + "0: big openings appear anywhere, like vanilla.");
 
         this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> onDonePressed())
-                .bounds(centerX - BUTTON_WIDTH - 5, centerY + 148, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .bounds(centerX - BUTTON_WIDTH - 5, centerY + 116, BUTTON_WIDTH, BUTTON_HEIGHT)
                 .build());
         this.addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> onClose())
-                .bounds(centerX + 5, centerY + 148, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .bounds(centerX + 5, centerY + 116, BUTTON_WIDTH, BUTTON_HEIGHT)
                 .build());
 
-        validationTextWidget = new StringWidget(0, centerY + 170, this.width, 9, Component.empty(), this.font);
+        validationTextWidget = new StringWidget(0, centerY + 140, this.width, 9, Component.empty(), this.font);
         this.addRenderableWidget(validationTextWidget);
     }
 

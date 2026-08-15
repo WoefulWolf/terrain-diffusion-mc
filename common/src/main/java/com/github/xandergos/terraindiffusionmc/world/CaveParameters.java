@@ -9,8 +9,8 @@ package com.github.xandergos.terraindiffusionmc.world;
  */
 public final class CaveParameters {
 
-    public static final int DEFAULT_SMALL_SEAL_BLOCKS = 9;
-    public static final int DEFAULT_LARGE_SEAL_BLOCKS = 16;
+    public static final int DEFAULT_SMALL_SEAL_BLOCKS = 5;
+    public static final int DEFAULT_LARGE_SEAL_BLOCKS = 10;
 
     public static final CaveParameters DEFAULT =
             new CaveParameters(DEFAULT_SMALL_SEAL_BLOCKS, DEFAULT_LARGE_SEAL_BLOCKS);

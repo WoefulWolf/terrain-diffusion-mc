@@ -50,14 +50,16 @@ public final class CaveSurfaceGate {
      * Roughens the underside of the seal. The seal is a per-column height, so a void it
      * truncates would end in a dead-flat stone ceiling; sampled in 3D at cave scale, the
      * cut becomes a ragged rock face instead. Only sealed columns use it, so open
-     * country generates exactly as before.
+     * country generates exactly as before. The swing scales with the seal and never
+     * exceeds a third of it, so a shallow setting still keeps most of its cover.
      */
     private static final FastNoiseLite CEILING_JITTER = makeFnl(0xCE117, 1f / 16f, 2);
-    private static final float CEILING_JITTER_BLOCKS = 3f;
+    private static final float CEILING_JITTER_MAX_BLOCKS = 3f;
 
-    /** Blocks to shift the seal boundary at this position; in [-3, 3]-ish. */
-    public static float ceilingJitter(int x, int y, int z) {
-        return CEILING_JITTER.GetNoise(x, y, z) * CEILING_JITTER_BLOCKS;
+    /** Blocks to shift the seal boundary at this position. */
+    public static float ceilingJitter(int x, int y, int z, int sealBlocks) {
+        float amp = Math.min(CEILING_JITTER_MAX_BLOCKS, sealBlocks / 3f);
+        return CEILING_JITTER.GetNoise(x, y, z) * amp;
     }
 
     private CaveSurfaceGate() {

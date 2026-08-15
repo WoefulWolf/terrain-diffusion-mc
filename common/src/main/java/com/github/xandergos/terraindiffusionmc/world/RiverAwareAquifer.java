@@ -59,7 +59,7 @@ public final class RiverAwareAquifer implements Aquifer {
         // Sealed ground keeps its skin: no tunnel or ravine may cut the top blocks. The
         // boundary jitters so a truncated tunnel ends in ragged rock, not a flat lid.
         int seal = CaveSurfaceGate.smallSealDepth(d, localX, localZ, x, z);
-        if (seal > 0 && y > firstAir - seal + CaveSurfaceGate.ceilingJitter(x, y, z)) return true;
+        if (seal > 0 && y > firstAir - seal + CaveSurfaceGate.ceilingJitter(x, y, z, seal)) return true;
 
         if (d.riverClass == null || d.riverClass[localZ][localX] == 0) return false;
 

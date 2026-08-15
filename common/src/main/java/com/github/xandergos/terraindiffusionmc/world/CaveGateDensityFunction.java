@@ -57,7 +57,7 @@ public final class CaveGateDensityFunction implements DensityFunction {
         }
     }
 
-    /** Gate height in the low half, sealed flag in the high half. */
+    /** Gate height in the low half, seal depth in the high half. */
     private long columnGate(int x, int z) {
         int size = TerrainDiffusionConfig.tileSize();
         int shift = Integer.numberOfTrailingZeros(size);
@@ -77,14 +77,15 @@ public final class CaveGateDensityFunction implements DensityFunction {
         int seal = large
                 ? CaveSurfaceGate.largeSealDepth(data, localX, localZ, x, z)
                 : CaveSurfaceGate.smallSealDepth(data, localX, localZ, x, z);
-        return ((seal > 0 ? 1L : 0L) << 32) | ((surface - seal) & 0xFFFFFFFFL);
+        return ((long) seal << 32) | ((surface - seal) & 0xFFFFFFFFL);
     }
 
     private double gateDensity(long column, int x, int y, int z) {
         double gateY = (int) column;
+        int seal = (int) (column >>> 32);
         // A sealed cut jitters in 3D so a truncated void ends in ragged rock, not a
         // flat lid. Open columns take none, staying identical to the terrain function.
-        if ((column >>> 32) != 0) gateY += CaveSurfaceGate.ceilingJitter(x, y, z);
+        if (seal != 0) gateY += CaveSurfaceGate.ceilingJitter(x, y, z, seal);
         return Mth.clamp((gateY - y) / DEPTH_SCALE, -DENSITY_LIMIT, DENSITY_LIMIT);
     }
 

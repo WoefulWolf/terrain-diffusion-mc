@@ -535,15 +535,24 @@ public final class LocalTerrainProvider {
     private static final float RIPARIAN_BANK_WOBBLE_BLOCKS = 1f;
 
     /**
+     * A river surface never claims below this. The drainage surface can dip under sea
+     * level across a delta flat, and water claimed there would be dropped as ocean's
+     * territory; the real surface of a tidal lower course is the sea's.
+     */
+    private static final float TIDEWATER_SURFACE_METRES = 0.05f;
+
+    /**
      * Marshy deltas. A big slack river reaching the sea drops its sediment, so the low
      * flats around the mouth silt over into marsh — swamp, or mangrove where it is hot —
-     * beaches included. Steep or small mouths keep their sand and waterfalls.
+     * beaches included. Steep or small mouths keep their sand and waterfalls. Sized so a
+     * delta is either a proper landscape feature or absent: a pocket marsh two trees
+     * wide reads as a mistake.
      */
-    private static final float DELTA_MIN_HALF_BLOCKS = 6f;
+    private static final float DELTA_MIN_HALF_BLOCKS = 10f;
     private static final float DELTA_MAX_STEEP = 0.45f;
     private static final int DELTA_STEEP_TAIL_BLOCKS = 24;
-    private static final float DELTA_REACH_FACTOR = 2.5f;
-    private static final float DELTA_MAX_REACH_BLOCKS = 64f;
+    private static final float DELTA_REACH_FACTOR = 3.5f;
+    private static final float DELTA_MAX_REACH_BLOCKS = 96f;
     private static final float DELTA_MAX_ELEV_BLOCKS = 2f;
     private static final float DELTA_MIN_TEMP_C = 5f;
     private static final float DELTA_MANGROVE_TEMP_C = 26f;
@@ -754,7 +763,12 @@ public final class LocalTerrainProvider {
                     // Taken from the drainage analysis rather than from this tile. That
                     // elevation already descends along the path and is shared by every tile
                     // the river crosses, so the water surface cannot step at a tile border.
-                    runSurf[count] = path.ground[k] - freeboardMetres;
+                    // Floored just above the sea: a lower course whose surface would dip
+                    // under sea level is tidewater, and without the floor every claim on a
+                    // low coastal flat is discarded as "the ocean's to fill" — the river
+                    // runs bone dry across its own delta.
+                    runSurf[count] = Math.max(path.ground[k] - freeboardMetres,
+                            TIDEWATER_SURFACE_METRES);
                     count++;
                 } else if (count > 0) {
                     // A path may leave and re-enter, so carve each run as it closes.

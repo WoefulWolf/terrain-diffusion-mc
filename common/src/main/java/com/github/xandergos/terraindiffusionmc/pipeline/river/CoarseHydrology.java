@@ -363,37 +363,169 @@ public final class CoarseHydrology {
     }
 
     /**
-     * Raises interior sinks until every land cell drains.
+     * Connects interior sinks to real drainage by breaching instead of raising.
      *
-     * <p>The flat tilt is not bounded by the surrounding terrain, so it can lift a
-     * resolved flat above a neighbour that drained into it by a hair. That neighbour
-     * becomes a local minimum the fill is supposed to guarantee away: a river walking in
-     * ends mid-plain, and its discharge vanishes from everything downstream. Window-edge
-     * cells keep their -1, since leaving the window is a legitimate exit.
+     * <p>The flat tilt can leave a cell of a filled plateau with no lower neighbour.
+     * Raising that cell just hands the minimum to whichever neighbour drained through
+     * it: the sink migrates around the flat one cell per pass instead of disappearing,
+     * and a river walking in still ends mid-plain with its discharge gone. So take the
+     * whole connected patch of stuck cells at once, find its pour point — the lowest
+     * surrounding cell whose flow provably leaves without returning, or the sea, or
+     * the window border as a legitimate exit — and point every stuck cell along a tree
+     * towards it. The surface itself is untouched: the river crosses the flat at spill
+     * height, which is exactly what a pond looks like.
      */
     private static int[] repairInteriorSinks(float[] filled, boolean[] ocean,
                                              int[] downstream, int height, int width) {
-        for (int pass = 0; pass < 8; pass++) {
-            boolean repaired = false;
-            for (int r = 1; r < height - 1; r++) {
-                for (int c = 1; c < width - 1; c++) {
-                    int i = r * width + c;
-                    if (ocean[i] || downstream[i] >= 0) continue;
-                    float minN = Float.MAX_VALUE;
-                    for (int d = 0; d < 8; d++) {
-                        int ni = (r + DR[d]) * width + (c + DC[d]);
-                        if (!ocean[ni]) minN = Math.min(minN, filled[ni]);
-                    }
-                    if (minN == Float.MAX_VALUE) continue;
-                    filled[i] = minN + FLAT_EPSILON;
-                    repaired = true;
-                }
-            }
-            if (!repaired) break;
-            // A raise can strand a former inflow, so re-route and sweep again.
-            downstream = routeD8(filled, ocean, height, width);
+        int[][] scratch = new int[2][];
+        int[] stamp = {0};
+
+        // A patch can only verify an exit once the patch that exit drains into is wired
+        // itself, so sweep until nothing changes. Mutually dependent patches starve the
+        // strict rule, so after it stabilises one relaxed sweep may drain into a still-
+        // stuck patch (never its own — that would be a cycle), then strict finishes up.
+        for (int pass = 0; pass < 6; pass++) {
+            if (!sweepSinks(filled, ocean, downstream, height, width, scratch, stamp, false)) break;
+        }
+        sweepSinks(filled, ocean, downstream, height, width, scratch, stamp, true);
+        for (int pass = 0; pass < 4; pass++) {
+            if (!sweepSinks(filled, ocean, downstream, height, width, scratch, stamp, false)) break;
         }
         return downstream;
+    }
+
+    private static boolean sweepSinks(float[] filled, boolean[] ocean, int[] downstream,
+                                      int height, int width, int[][] scratch, int[] stamp,
+                                      boolean allowStuckEnd) {
+        boolean wired = false;
+        for (int r = 1; r < height - 1; r++) {
+            for (int c = 1; c < width - 1; c++) {
+                int start = r * width + c;
+                if (ocean[start] || downstream[start] >= 0) continue;
+                if (scratch[0] == null) {
+                    scratch[0] = new int[height * width];
+                    scratch[1] = new int[height * width];
+                }
+                stamp[0]++;
+                wired |= breachPatch(filled, ocean, downstream, height, width,
+                        start, scratch[0], scratch[1], stamp[0], allowStuckEnd);
+            }
+        }
+        return wired;
+    }
+
+    /**
+     * The tilt's minima are epsilon-scale, so the sink's whole near-level plateau — the
+     * pond that funnels into it — is flooded and rewired at once. Anything meaningfully
+     * higher is real terrain and keeps its drainage.
+     */
+    private static final float BREACH_TOLERANCE = 0.25f;
+    private static final int BREACH_MAX_CELLS = 1 << 17;
+
+    /** Floods one sink's plateau, finds a proven pour point, and wires a tree to it. */
+    private static boolean breachPatch(float[] filled, boolean[] ocean, int[] downstream,
+                                       int height, int width, int start,
+                                       int[] seen, int[] queue, int stamp,
+                                       boolean allowStuckEnd) {
+        // Flood the pond: every interior cell effectively level with the sink, draining
+        // or not. The level cells that drain here drain INTO the sink, which is how it
+        // swallowed the river; they are rewired with everything else. Anything above the
+        // band is real terrain, anything below it is escape ground — both are candidate
+        // pour points, not members, which keeps the flood the size of the pond.
+        float bandLo = filled[start] - 4f * FLAT_EPSILON;
+        float bandHi = filled[start] + BREACH_TOLERANCE;
+        int head = 0, tail = 0;
+        long[] exits = new long[64];
+        int exitCount = 0;
+        queue[tail++] = start;
+        seen[start] = stamp;
+        while (head < tail && tail < BREACH_MAX_CELLS) {
+            int cur = queue[head++];
+            int cr = cur / width, cc = cur - cr * width;
+            for (int d = 0; d < 8; d++) {
+                int nr = cr + DR[d], nc = cc + DC[d];
+                int ni = nr * width + nc;
+                if (seen[ni] == stamp) continue;
+                boolean border = nr == 0 || nc == 0 || nr == height - 1 || nc == width - 1;
+                if (!ocean[ni] && !border && filled[ni] >= bandLo && filled[ni] <= bandHi) {
+                    seen[ni] = stamp;
+                    queue[tail++] = ni;
+                } else {
+                    if (exitCount == exits.length) exits = Arrays.copyOf(exits, exitCount * 2);
+                    exits[exitCount++] = packKey(filled[ni], ni);
+                }
+            }
+        }
+        if (tail >= BREACH_MAX_CELLS) return false;
+
+        // Lowest exit first; sea sits below any land in the key order. An exit whose own
+        // flow would come back into the plateau is a cycle waiting to happen; skip it.
+        Arrays.sort(exits, 0, exitCount);
+        int gate = -1;
+        for (int e = 0; e < exitCount; e++) {
+            int candidate = (int) (exits[e] & 0xFFFFFFFFL);
+            if (chainEscapes(candidate, downstream, ocean, seen, stamp, height, width, allowStuckEnd)) {
+                gate = candidate;
+                break;
+            }
+        }
+        if (gate < 0) return false; // a genuine terminal pit; the river may end here
+
+        // Wire the whole plateau as a tree draining to the gate. Every plateau pointer
+        // is overwritten, so nothing funnels into the old pit any more. The queue is
+        // safely reused: membership lives in seen, not in the list.
+        int wiredStamp = -stamp;
+        int gr = gate / width, gc = gate - gr * width;
+        int[] wire = queue;
+        int wireTail = 0;
+        for (int d = 0; d < 8; d++) {
+            int nr = gr + DR[d], nc = gc + DC[d];
+            if (nr < 0 || nr >= height || nc < 0 || nc >= width) continue;
+            int ni = nr * width + nc;
+            if (seen[ni] == stamp) {
+                downstream[ni] = gate;
+                seen[ni] = wiredStamp;
+                wire[wireTail++] = ni;
+            }
+        }
+        int wireHead = 0;
+        while (wireHead < wireTail) {
+            int cur = wire[wireHead++];
+            int cr = cur / width, cc = cur - cr * width;
+            for (int d = 0; d < 8; d++) {
+                int nr = cr + DR[d], nc = cc + DC[d];
+                int ni = nr * width + nc;
+                if (seen[ni] == stamp) {
+                    downstream[ni] = cur;
+                    seen[ni] = wiredStamp;
+                    wire[wireTail++] = ni;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * True when a candidate exit's flow reaches the sea or the window border without
+     * re-entering the stuck patch. An exit that drains back in would close a cycle the
+     * moment the patch is wired to it. With {@code allowStuckEnd} a chain may end at a
+     * different stuck patch — that is a dead end, not a cycle, and strictly better than
+     * leaving this patch stuck too.
+     */
+    private static boolean chainEscapes(int exit, int[] downstream, boolean[] ocean,
+                                        int[] seen, int stamp, int height, int width,
+                                        boolean allowStuckEnd) {
+        int cur = exit;
+        for (int step = 0, cap = height * width; step < cap; step++) {
+            if (seen[cur] == stamp) return false;
+            if (ocean[cur]) return true;
+            int r = cur / width, c = cur - r * width;
+            if (r == 0 || c == 0 || r == height - 1 || c == width - 1) return true;
+            int to = downstream[cur];
+            if (to < 0) return allowStuckEnd;
+            cur = to;
+        }
+        return false;
     }
 
     /** Steepest-descent D8 over the filled surface. Ocean cells terminate flow. */
@@ -437,8 +569,10 @@ public final class CoarseHydrology {
     }
 
     /**
-     * Accumulates precipitation downstream, processing cells from high to low so every
-     * contributor is added before its receiver is read.
+     * Accumulates precipitation downstream in topological order over the pointer graph
+     * itself, so every contributor is added before its receiver is read. A height sort
+     * would do the same on strictly descending pointers, but breached flats drain along
+     * level ground where ties quietly drop contributions.
      *
      * <p>Seeding with rainfall rather than a unit per cell makes this a discharge proxy,
      * so an arid catchment accumulates little however large it is.
@@ -452,25 +586,28 @@ public final class CoarseHydrology {
                                       boolean[] edgeFed) {
         int n = height * width;
         float[] discharge = new float[n];
-        long[] order = new long[n];
-        int count = 0;
+        int[] indegree = new int[n];
 
         for (int i = 0; i < n; i++) {
             if (ocean[i]) continue;
             int r = i / width, c = i - r * width;
             edgeFed[i] = r == 0 || c == 0 || r == height - 1 || c == width - 1;
             discharge[i] = precip == null ? 1f : Math.max(0f, precip[i]);
-            order[count++] = packKey(filled[i], i);
+            int to = downstream[i];
+            if (to >= 0 && !ocean[to]) indegree[to]++;
         }
 
-        // Primitive sort on packed keys; ascending by elevation, so walk it backwards.
-        Arrays.sort(order, 0, count);
-        for (int k = count - 1; k >= 0; k--) {
-            int i = (int) (order[k] & 0xFFFFFFFFL);
+        int[] queue = new int[n];
+        int head = 0, tail = 0;
+        for (int i = 0; i < n; i++)
+            if (!ocean[i] && indegree[i] == 0) queue[tail++] = i;
+        while (head < tail) {
+            int i = queue[head++];
             int to = downstream[i];
             if (to >= 0 && !ocean[to]) {
                 discharge[to] += discharge[i];
                 if (edgeFed[i]) edgeFed[to] = true;
+                if (--indegree[to] == 0) queue[tail++] = to;
             }
         }
         return discharge;

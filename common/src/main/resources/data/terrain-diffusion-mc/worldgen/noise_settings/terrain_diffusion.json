@@ -61,7 +61,7 @@
       "argument1": {
         "type": "minecraft:range_choice",
         "input": {
-          "type": "terrain-diffusion-mc:terrain_diffusion"
+          "type": "terrain-diffusion-mc:cave_gate_small"
         },
         "min_inclusive": -1000000.0,
         "max_exclusive": 1.5625,
@@ -73,9 +73,18 @@
           "argument2": {
             "type": "minecraft:interpolated",
             "argument": {
-              "type": "minecraft:mul",
-              "argument1": 5.0,
-              "argument2": "minecraft:overworld/caves/entrances"
+              "type": "minecraft:range_choice",
+              "input": {
+                "type": "terrain-diffusion-mc:cave_gate_large"
+              },
+              "min_inclusive": -1000000.0,
+              "max_exclusive": 0.0,
+              "when_in_range": 64.0,
+              "when_out_of_range": {
+                "type": "minecraft:mul",
+                "argument1": 5.0,
+                "argument2": "minecraft:overworld/caves/entrances"
+              }
             }
           }
         },
@@ -156,7 +165,16 @@
           }
         }
       },
-      "argument2": "minecraft:overworld/caves/noodle"
+      "argument2": {
+        "type": "minecraft:range_choice",
+        "input": {
+          "type": "terrain-diffusion-mc:cave_gate_small"
+        },
+        "min_inclusive": -1000000.0,
+        "max_exclusive": 0.0,
+        "when_in_range": 64.0,
+        "when_out_of_range": "minecraft:overworld/caves/noodle"
+      }
     },
     "vein_toggle": 0,
     "vein_ridged": 0,

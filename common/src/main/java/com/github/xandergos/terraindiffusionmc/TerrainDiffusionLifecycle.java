@@ -5,6 +5,7 @@ import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider;
 import com.github.xandergos.terraindiffusionmc.platform.PlatformPaths;
 import com.github.xandergos.terraindiffusionmc.pipeline.ModelAssetManager;
 import com.github.xandergos.terraindiffusionmc.pipeline.PipelineModels;
+import com.github.xandergos.terraindiffusionmc.world.CaveGateDensityFunction;
 import com.github.xandergos.terraindiffusionmc.world.TerrainDiffusionBiomeSource;
 import com.github.xandergos.terraindiffusionmc.world.TerrainDiffusionDensityFunction;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleManager;
@@ -68,10 +69,14 @@ public final class TerrainDiffusionLifecycle {
     }
 
     /**
-     * Registers the common density function codec through the active loader's registry hook.
+     * Registers the common density function codecs through the active loader's registry hook.
      */
     public static void registerDensityFunctionCodecs(CodecRegistrar<MapCodec<? extends DensityFunction>> registrar) {
         registrar.register(TERRAIN_DIFFUSION_ID, TerrainDiffusionDensityFunction.CODEC);
+        registrar.register(ResourceLocation.fromNamespaceAndPath(MOD_ID, "cave_gate_small"),
+                CaveGateDensityFunction.SMALL_CODEC);
+        registrar.register(ResourceLocation.fromNamespaceAndPath(MOD_ID, "cave_gate_large"),
+                CaveGateDensityFunction.LARGE_CODEC);
     }
 
     @FunctionalInterface

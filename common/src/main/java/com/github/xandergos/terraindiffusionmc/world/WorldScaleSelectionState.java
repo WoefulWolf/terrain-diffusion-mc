@@ -56,6 +56,25 @@ public final class WorldScaleSelectionState {
         return parameters != null ? parameters : RiverParameters.DEFAULT;
     }
 
+    private static final AtomicReference<CaveParameters> PENDING_CAVE_PARAMETERS =
+            new AtomicReference<>();
+
+    /** Stores pending cave gate parameters selected in world creation UI. */
+    public static void setPendingCaveParameters(CaveParameters parameters) {
+        PENDING_CAVE_PARAMETERS.set(parameters);
+    }
+
+    /** Returns and clears the pending cave gate parameters, if any. */
+    public static CaveParameters consumePendingCaveParameters() {
+        return PENDING_CAVE_PARAMETERS.getAndSet(null);
+    }
+
+    /** Returns the pending cave gate parameters, or the defaults if none are set. */
+    public static CaveParameters getPendingCaveParametersOrDefault() {
+        CaveParameters parameters = PENDING_CAVE_PARAMETERS.get();
+        return parameters != null ? parameters : CaveParameters.DEFAULT;
+    }
+
     /** Stores a pending river mode selected in world creation UI. */
     public static void setPendingRiverMode(RiverMode mode) {
         PENDING_RIVER_MODE.set(mode);

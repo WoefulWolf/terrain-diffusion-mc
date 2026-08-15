@@ -42,6 +42,8 @@ Where vanilla convention and real-world logic disagree, this fork picks the real
 
 Cave generation now uses vanilla's Caves & Cliffs noise on top of the diffusion terrain: **cheese caverns, spaghetti tunnels, noodle caves, cave entrances and pillars**, alongside the carver tunnels and ravines that were already there. Aquifers are enabled to go with it, so caves below sea level are dry rather than flooded, with underground water and lava pockets where vanilla would put them.
 
+Underground they run everywhere, but the surface only breaks where real landscapes break: small cave mouths open in genuinely craggy ground and rocky biomes, while the big entrance shafts need the right country — glacier and snowfield crevasse terrain, humid forested karst hills, or broken canyon rock — and a rare landscape-scale mask on top, so a gaping mouth is an event rather than a texture. A flat green field keeps its skin: tunnels, caverns and ravines all stay a dozen or more blocks down there instead of scarring the surface.
+
 ### Rivers and lakes
 
 Rivers are traced from a real drainage analysis of the terrain itself: rainfall accumulates downhill across the heightmap, and only systems that gather a genuinely large catchment become rivers. Each one is then followed back up its main stem, so sources sit high in wet, cold, or rugged country and the river spends its whole run growing — springs a single block wide, trunks up to 50+ blocks, over courses that can span many thousands of blocks.
@@ -160,6 +162,8 @@ For Terrain Diffusion worlds, click **Customize** in world creation. Everything 
 **Rivers**: `Off` disables the system entirely; `Fast` analyses drainage in small regions (short, frequent generation pauses, smaller biggest-rivers); `Detailed` uses large regions (rarer but longer pauses, room for major rivers).
 
 Below the mode sit ten river parameters — rarity, source size, maximum width and depth, width growth, bank height, lake size and depth, bank wobble, and bed relief. Every field has a hover tooltip explaining in plain terms what raising or lowering it does; the defaults are the tuned values.
+
+**Caves**: two cover depths control how far below the surface caves must stay in gentle country — one for small tunnels and ravines, one for big caverns and their wide mouths. Craggy, rocky, and karst-like country still opens as described above. Set a field to `0` to switch that gate off and let those breaks appear anywhere, the way vanilla generates.
 
 ## Common Issues
 

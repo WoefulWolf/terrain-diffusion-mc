@@ -23,8 +23,20 @@ public final class WorldScaleSettingsState extends SavedData {
             Codec.STRING.optionalFieldOf("river_mode", RiverMode.DEFAULT.id())
                     .forGetter(state -> state.riverMode.id()),
             RiverParametersCodec.CODEC.optionalFieldOf("river_parameters", RiverParameters.DEFAULT)
-                    .forGetter(state -> state.riverParameters)
+                    .forGetter(state -> state.riverParameters),
+            CaveParametersCodec.CODEC.optionalFieldOf("cave_parameters", CaveParameters.DEFAULT)
+                    .forGetter(state -> state.caveParameters)
     ).apply(instance, WorldScaleSettingsState::new));
+
+    /** Nested for the same builder-field-limit reason as the river codec. */
+    private static final class CaveParametersCodec {
+        static final Codec<CaveParameters> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.INT.optionalFieldOf("small_seal", CaveParameters.DEFAULT_SMALL_SEAL_BLOCKS)
+                        .forGetter(p -> p.smallSealBlocks),
+                Codec.INT.optionalFieldOf("large_seal", CaveParameters.DEFAULT_LARGE_SEAL_BLOCKS)
+                        .forGetter(p -> p.largeSealBlocks)
+        ).apply(instance, CaveParameters::new));
+    }
 
     /** Nested codec so the settings record stays within the builder's field limit. */
     private static final class RiverParametersCodec {
@@ -56,21 +68,23 @@ public final class WorldScaleSettingsState extends SavedData {
     private boolean explicitScale;
     private RiverMode riverMode;
     private RiverParameters riverParameters;
+    private CaveParameters caveParameters;
 
     /**
      * Creates a default state for worlds that do not yet have saved terrain diffusion settings.
      */
     private WorldScaleSettingsState(int configuredScale, boolean hasExplicitScale, String riverModeId,
-                                    RiverParameters riverParameters) {
+                                    RiverParameters riverParameters, CaveParameters caveParameters) {
         this.scale = WorldScaleManager.clampScale(configuredScale);
         this.explicitScale = hasExplicitScale;
         this.riverMode = RiverMode.byId(riverModeId);
         this.riverParameters = riverParameters;
+        this.caveParameters = caveParameters;
     }
 
     public static WorldScaleSettingsState createDefault() {
         return new WorldScaleSettingsState(WorldScaleManager.DEFAULT_SCALE, false, RiverMode.DEFAULT.id(),
-                RiverParameters.DEFAULT);
+                RiverParameters.DEFAULT, CaveParameters.DEFAULT);
     }
 
     public RiverMode getRiverMode() {
@@ -88,6 +102,15 @@ public final class WorldScaleSettingsState extends SavedData {
 
     public void setRiverParameters(RiverParameters parameters) {
         this.riverParameters = parameters;
+        setDirty();
+    }
+
+    public CaveParameters getCaveParameters() {
+        return caveParameters;
+    }
+
+    public void setCaveParameters(CaveParameters parameters) {
+        this.caveParameters = parameters;
         setDirty();
     }
 

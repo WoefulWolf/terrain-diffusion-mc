@@ -13,6 +13,7 @@ public final class WorldScaleManager {
     private static volatile int currentScale = DEFAULT_SCALE;
     private static volatile RiverMode currentRiverMode = RiverMode.DEFAULT;
     private static volatile RiverParameters currentRiverParameters = RiverParameters.DEFAULT;
+    private static volatile CaveParameters currentCaveParameters = CaveParameters.DEFAULT;
 
     private WorldScaleManager() {
     }
@@ -38,11 +39,14 @@ public final class WorldScaleManager {
             if (pendingRivers != null) worldScaleSettingsState.setRiverMode(pendingRivers);
             RiverParameters pendingParameters = WorldScaleSelectionState.consumePendingRiverParameters();
             if (pendingParameters != null) worldScaleSettingsState.setRiverParameters(pendingParameters);
+            CaveParameters pendingCaves = WorldScaleSelectionState.consumePendingCaveParameters();
+            if (pendingCaves != null) worldScaleSettingsState.setCaveParameters(pendingCaves);
         }
 
         currentScale = clampScale(worldScaleSettingsState.getScale());
         currentRiverMode = worldScaleSettingsState.getRiverMode();
         currentRiverParameters = worldScaleSettingsState.getRiverParameters();
+        currentCaveParameters = worldScaleSettingsState.getCaveParameters();
         // Cached regions were analysed under the previous world's parameters.
         com.github.xandergos.terraindiffusionmc.pipeline.river.RiverRegions.clear();
     }
@@ -55,6 +59,11 @@ public final class WorldScaleManager {
     /** Returns the river generation parameters active for the loaded world. */
     public static RiverParameters getRiverParameters() {
         return currentRiverParameters;
+    }
+
+    /** Returns the cave surface gate parameters active for the loaded world. */
+    public static CaveParameters getCaveParameters() {
+        return currentCaveParameters;
     }
 
     /** Updates river mode for the currently loaded world and persists it immediately. */

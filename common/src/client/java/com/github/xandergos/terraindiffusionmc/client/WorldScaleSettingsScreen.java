@@ -1,5 +1,6 @@
 package com.github.xandergos.terraindiffusionmc.client;
 
+import com.github.xandergos.terraindiffusionmc.world.CaveParameters;
 import com.github.xandergos.terraindiffusionmc.world.RiverMode;
 import com.github.xandergos.terraindiffusionmc.world.RiverParameters;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleManager;
@@ -32,6 +33,10 @@ public final class WorldScaleSettingsScreen extends Screen {
     private static final Component RIVER_ERROR_TEXT = Component.literal("River settings must be numbers")
             .withStyle(ChatFormatting.RED);
 
+    private static final Component CAVE_LABEL_TEXT = Component.literal("Caves");
+    private static final Component CAVE_ERROR_TEXT = Component.literal("Cave settings must be whole numbers")
+            .withStyle(ChatFormatting.RED);
+
     private final Screen parentScreen;
     private EditBox scaleTextField;
     private StringWidget validationTextWidget;
@@ -47,6 +52,8 @@ public final class WorldScaleSettingsScreen extends Screen {
     private EditBox riverLakeDepthField;
     private EditBox riverWobbleField;
     private EditBox riverBedReliefField;
+    private EditBox caveSmallSealField;
+    private EditBox caveLargeSealField;
 
     public WorldScaleSettingsScreen(Screen parentScreen) {
         super(Component.translatable("terrain-diffusion-mc.world_settings.title"));
@@ -60,10 +67,10 @@ public final class WorldScaleSettingsScreen extends Screen {
 
         addCenteredTextWidget(this.title, centerX, 20, 0xFFFFFF);
 
-        addCenteredTextWidget(LABEL_TEXT, centerX, centerY - 96, 0xFFFFFF);
+        addCenteredTextWidget(LABEL_TEXT, centerX, centerY - 120, 0xFFFFFF);
 
         scaleTextField = new EditBox(this.font,
-                centerX - TEXT_FIELD_WIDTH / 2, centerY - 86,
+                centerX - TEXT_FIELD_WIDTH / 2, centerY - 110,
                 TEXT_FIELD_WIDTH, 18,
                 LABEL_TEXT);
         scaleTextField.setValue(String.valueOf(WorldScaleSelectionState.getPendingScaleOrDefault()));
@@ -72,7 +79,7 @@ public final class WorldScaleSettingsScreen extends Screen {
         this.addRenderableWidget(scaleTextField);
         this.setInitialFocus(scaleTextField);
 
-        addCenteredTextWidget(RIVER_LABEL_TEXT, centerX, centerY - 58, 0xFFFFFF);
+        addCenteredTextWidget(RIVER_LABEL_TEXT, centerX, centerY - 82, 0xFFFFFF);
 
         riverMode = WorldScaleSelectionState.getPendingRiverModeOrDefault();
         riverModeButton = Button.builder(riverModeLabel(), button -> {
@@ -80,61 +87,73 @@ public final class WorldScaleSettingsScreen extends Screen {
                     riverModeButton.setMessage(riverModeLabel());
                     riverModeButton.setTooltip(Tooltip.create(riverModeDescription()));
                 })
-                .bounds(centerX - BUTTON_WIDTH, centerY - 48, BUTTON_WIDTH * 2, BUTTON_HEIGHT)
+                .bounds(centerX - BUTTON_WIDTH, centerY - 72, BUTTON_WIDTH * 2, BUTTON_HEIGHT)
                 .build();
         riverModeButton.setTooltip(Tooltip.create(riverModeDescription()));
         this.addRenderableWidget(riverModeButton);
 
         RiverParameters p = WorldScaleSelectionState.getPendingRiverParametersOrDefault();
         int left = centerX - 78, right = centerX + 6;
-        riverRarityField = addRiverField(left, centerY - 14, "Rarity", String.valueOf(p.mainChannelCells),
+        riverRarityField = addLabeledField(left, centerY - 38, "Rarity", String.valueOf(p.mainChannelCells),
                 "How much land must drain together before a river forms at all. "
                         + "Higher: fewer, rarer rivers. Lower: rivers everywhere.");
-        riverSourceField = addRiverField(right, centerY - 14, "Source size", String.valueOf(p.headwaterCells),
+        riverSourceField = addLabeledField(right, centerY - 38, "Source size", String.valueOf(p.headwaterCells),
                 "How small a stream can be at its source. Lower: springs start higher in the "
                         + "mountains and rivers run longer. Higher: rivers appear further downhill, "
                         + "already grown.");
-        riverWidthField = addRiverField(left, centerY + 18, "Max width", String.valueOf(p.maxWidthBlocks),
+        riverWidthField = addLabeledField(left, centerY - 8, "Max width", String.valueOf(p.maxWidthBlocks),
                 "The widest a river can grow, in blocks. Higher: major rivers become enormous. "
                         + "Lower: even the biggest stay modest.");
-        riverDepthField = addRiverField(right, centerY + 18, "Max depth", String.valueOf(p.maxDepthBlocks),
+        riverDepthField = addLabeledField(right, centerY - 8, "Max depth", String.valueOf(p.maxDepthBlocks),
                 "The deepest a river can carve, in blocks. Higher: deep gorges under big rivers. "
                         + "Lower: everything stays shallow.");
-        riverWidthGrowthField = addRiverField(left, centerY + 50, "Width growth", String.valueOf(p.widthExponent),
+        riverWidthGrowthField = addLabeledField(left, centerY + 22, "Width growth", String.valueOf(p.widthExponent),
                 "How quickly a river widens as streams join it. Higher: wide soon after the "
                         + "source. Lower: narrow for most of its run.");
-        riverBankHeightField = addRiverField(right, centerY + 50, "Bank height", String.valueOf(p.freeboardBlocks),
+        riverBankHeightField = addLabeledField(right, centerY + 22, "Bank height", String.valueOf(p.freeboardBlocks),
                 "How high the banks stand above the water, in blocks. Higher: rivers sit sunken "
                         + "below the land. Lower: water sits nearly level with it.");
-        riverLakeSizeField = addRiverField(left, centerY + 82, "Lake size", String.valueOf(p.lakeMinCells),
+        riverLakeSizeField = addLabeledField(left, centerY + 52, "Lake size", String.valueOf(p.lakeMinCells),
                 "The smallest hollow that fills as a lake instead of the river carving through. "
                         + "Higher: only large basins become lakes. Lower: many small ponds.");
-        riverLakeDepthField = addRiverField(right, centerY + 82, "Lake depth", String.valueOf(p.lakeDepthBlocks),
+        riverLakeDepthField = addLabeledField(right, centerY + 52, "Lake depth", String.valueOf(p.lakeDepthBlocks),
                 "How deep lakes are dug, in blocks. Higher: deep swimmable lakes. "
                         + "Lower: shallow sheets of water.");
-        riverWobbleField = addRiverField(left, centerY + 114, "Bank wobble", String.valueOf(p.edgeWobbleBlocks),
+        riverWobbleField = addLabeledField(left, centerY + 82, "Bank wobble", String.valueOf(p.edgeWobbleBlocks),
                 "How ragged the shorelines of big rivers are, in blocks. Higher: wild, irregular "
                         + "banks. Lower: smooth, even curves.");
-        riverBedReliefField = addRiverField(right, centerY + 114, "Bed relief", String.valueOf(p.bedReliefBlocks),
+        riverBedReliefField = addLabeledField(right, centerY + 82, "Bed relief", String.valueOf(p.bedReliefBlocks),
                 "How bumpy river and lake floors are, in blocks. Higher: underwater dunes and "
                         + "hollows. Lower: flat floors.");
 
+        addCenteredTextWidget(CAVE_LABEL_TEXT, centerX, centerY + 104, 0xFFFFFF);
+
+        CaveParameters c = WorldScaleSelectionState.getPendingCaveParametersOrDefault();
+        caveSmallSealField = addLabeledField(left, centerY + 124, "Tunnel cover", String.valueOf(c.smallSealBlocks),
+                "How deep small cave tunnels and ravines must stay below gentle ground, in "
+                        + "blocks. They still surface in craggy or rocky country. "
+                        + "0: they may break the surface anywhere, like vanilla.");
+        caveLargeSealField = addLabeledField(right, centerY + 124, "Cavern cover", String.valueOf(c.largeSealBlocks),
+                "How deep big caverns and their wide mouths must stay below the surface, in "
+                        + "blocks. Rare mouths still open in crevasse, karst and canyon country. "
+                        + "0: big openings appear anywhere, like vanilla.");
+
         this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> onDonePressed())
-                .bounds(centerX - BUTTON_WIDTH - 5, centerY + 142, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .bounds(centerX - BUTTON_WIDTH - 5, centerY + 148, BUTTON_WIDTH, BUTTON_HEIGHT)
                 .build());
         this.addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> onClose())
-                .bounds(centerX + 5, centerY + 142, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .bounds(centerX + 5, centerY + 148, BUTTON_WIDTH, BUTTON_HEIGHT)
                 .build());
 
-        validationTextWidget = new StringWidget(0, centerY + 166, this.width, 9, Component.empty(), this.font);
+        validationTextWidget = new StringWidget(0, centerY + 170, this.width, 9, Component.empty(), this.font);
         this.addRenderableWidget(validationTextWidget);
     }
 
     /**
-     * One labelled field of the river grid, prefilled with the world default and carrying
-     * its plain-language explanation as a hover tooltip.
+     * One labelled field of the settings grid, prefilled with the world default and
+     * carrying its plain-language explanation as a hover tooltip.
      */
-    private EditBox addRiverField(int x, int y, String label, String value, String description) {
+    private EditBox addLabeledField(int x, int y, String label, String value, String description) {
         addCenteredTextWidget(Component.literal(label), x + 36, y - 10, 0xAAAAAA);
         EditBox field = new EditBox(this.font, x, y, 72, 18, Component.literal(label));
         field.setValue(value);
@@ -216,10 +235,21 @@ public final class WorldScaleSettingsScreen extends Screen {
                 return;
             }
 
+            CaveParameters caveParameters;
+            try {
+                caveParameters = new CaveParameters(
+                        Integer.parseInt(caveSmallSealField.getValue().trim()),
+                        Integer.parseInt(caveLargeSealField.getValue().trim()));
+            } catch (NumberFormatException exception) {
+                validationTextWidget.setMessage(CAVE_ERROR_TEXT);
+                return;
+            }
+
             applyWorldHeightForScale(selectedScale);
             WorldScaleSelectionState.setPendingScale(selectedScale);
             WorldScaleSelectionState.setPendingRiverMode(riverMode);
             WorldScaleSelectionState.setPendingRiverParameters(riverParameters);
+            WorldScaleSelectionState.setPendingCaveParameters(caveParameters);
             onClose();
         } catch (NumberFormatException exception) {
             validationTextWidget.setMessage(ERROR_TEXT);

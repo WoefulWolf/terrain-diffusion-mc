@@ -14,6 +14,7 @@ public final class WorldScaleManager {
     private static volatile RiverMode currentRiverMode = RiverMode.DEFAULT;
     private static volatile RiverParameters currentRiverParameters = RiverParameters.DEFAULT;
     private static volatile CaveParameters currentCaveParameters = CaveParameters.DEFAULT;
+    private static volatile LatitudeParameters currentLatitudeParameters = LatitudeParameters.DEFAULT;
 
     private WorldScaleManager() {
     }
@@ -41,12 +42,15 @@ public final class WorldScaleManager {
             if (pendingParameters != null) worldScaleSettingsState.setRiverParameters(pendingParameters);
             CaveParameters pendingCaves = WorldScaleSelectionState.consumePendingCaveParameters();
             if (pendingCaves != null) worldScaleSettingsState.setCaveParameters(pendingCaves);
+            LatitudeParameters pendingLatitude = WorldScaleSelectionState.consumePendingLatitudeParameters();
+            if (pendingLatitude != null) worldScaleSettingsState.setLatitudeParameters(pendingLatitude);
         }
 
         currentScale = clampScale(worldScaleSettingsState.getScale());
         currentRiverMode = worldScaleSettingsState.getRiverMode();
         currentRiverParameters = worldScaleSettingsState.getRiverParameters();
         currentCaveParameters = worldScaleSettingsState.getCaveParameters();
+        currentLatitudeParameters = worldScaleSettingsState.getLatitudeParameters();
         // Cached regions were analysed under the previous world's parameters.
         com.github.xandergos.terraindiffusionmc.pipeline.river.RiverRegions.clear();
     }
@@ -64,6 +68,11 @@ public final class WorldScaleManager {
     /** Returns the cave surface gate parameters active for the loaded world. */
     public static CaveParameters getCaveParameters() {
         return currentCaveParameters;
+    }
+
+    /** Returns the latitude banding parameters active for the loaded world. */
+    public static LatitudeParameters getLatitudeParameters() {
+        return currentLatitudeParameters;
     }
 
     /** Updates river mode for the currently loaded world and persists it immediately. */

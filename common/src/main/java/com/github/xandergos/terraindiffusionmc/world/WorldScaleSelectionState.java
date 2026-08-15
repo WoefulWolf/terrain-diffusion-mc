@@ -75,6 +75,25 @@ public final class WorldScaleSelectionState {
         return parameters != null ? parameters : CaveParameters.DEFAULT;
     }
 
+    private static final AtomicReference<LatitudeParameters> PENDING_LATITUDE_PARAMETERS =
+            new AtomicReference<>();
+
+    /** Stores pending latitude banding parameters selected in world creation UI. */
+    public static void setPendingLatitudeParameters(LatitudeParameters parameters) {
+        PENDING_LATITUDE_PARAMETERS.set(parameters);
+    }
+
+    /** Returns and clears the pending latitude banding parameters, if any. */
+    public static LatitudeParameters consumePendingLatitudeParameters() {
+        return PENDING_LATITUDE_PARAMETERS.getAndSet(null);
+    }
+
+    /** Returns the pending latitude banding parameters, or the defaults if none are set. */
+    public static LatitudeParameters getPendingLatitudeParametersOrDefault() {
+        LatitudeParameters parameters = PENDING_LATITUDE_PARAMETERS.get();
+        return parameters != null ? parameters : LatitudeParameters.DEFAULT;
+    }
+
     /** Stores a pending river mode selected in world creation UI. */
     public static void setPendingRiverMode(RiverMode mode) {
         PENDING_RIVER_MODE.set(mode);

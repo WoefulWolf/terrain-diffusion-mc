@@ -3,6 +3,7 @@ package com.github.xandergos.terraindiffusionmc.pipeline;
 import com.github.xandergos.terraindiffusionmc.infinitetensor.FloatTensor;
 import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverCarver;
 import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverRegions;
+import com.github.xandergos.terraindiffusionmc.world.LatitudeParameters;
 import com.github.xandergos.terraindiffusionmc.world.RiverMode;
 import com.github.xandergos.terraindiffusionmc.world.RiverParameters;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleManager;
@@ -155,7 +156,30 @@ public final class LocalTerrainProvider {
      * @return float[2]: [0] = elev (H*W), [1] = climate (5*H*W, or null)
      */
     public static float[][] getPipelineData(int i1, int j1, int i2, int j2, boolean withClimate) throws Exception {
-        return submitToInferenceThread(() -> getInstance().pipeline.get(i1, j1, i2, j2, withClimate));
+        float[][] out = submitToInferenceThread(() -> getInstance().pipeline.get(i1, j1, i2, j2, withClimate));
+        if (withClimate && out != null && out.length > 1) {
+            out[1] = withLatitudeBias(out[1], i1, i2 - i1, j2 - j1,
+                    WorldScaleManager.getCurrentScale());
+        }
+        return out;
+    }
+
+    /**
+     * Adds the latitude temperature band to a fetched climate block, on a copy so the
+     * pipeline's cached tiles stay pristine. Native rows map to blocks through the
+     * scale, so every consumer of the temperature channel sees the same banded field
+     * whatever the window or resolution.
+     */
+    private static float[] withLatitudeBias(float[] climate, int i1Native, int nH, int nW, int scale) {
+        LatitudeParameters p = WorldScaleManager.getLatitudeParameters();
+        if (climate == null || p.bandStrengthC == 0 || climate.length < nH * nW) return climate;
+        float[] out = climate.clone();
+        for (int r = 0; r < nH; r++) {
+            float bias = p.temperatureBiasAt((i1Native + r) * (double) scale);
+            int row = r * nW;
+            for (int c = 0; c < nW; c++) out[row + c] += bias;
+        }
+        return out;
     }
 
     /**
@@ -284,7 +308,7 @@ public final class LocalTerrainProvider {
         float[] elevPadded = cropFlatFromFlat(elevWide, shorePad - 1, shorePad - 1, H + 2, W + 2, W + 2 * shorePad);
         float[][] out = pipeline.get(i1, j1, i2, j2, true);
         float[] elevFlat = out[0];
-        float[] climate  = out[1];
+        float[] climate  = withLatitudeBias(out[1], i1, H, W, 1);
 
         float[] coastDist = BiomeClassifier.coastDistance(elevWide, shorePad, H, W);
         short[] biomeFlat = BiomeClassifier.classify(elevFlat, climate, i1, j1, elevPadded, H, W, NATIVE_RESOLUTION, coastDist);
@@ -318,7 +342,7 @@ public final class LocalTerrainProvider {
 
         float[][] out = pipeline.get(i1p, j1p, i2p, j2p, true);
         float[] elevNativeFlat    = out[0];
-        float[] climateNativeFlat = out[1];
+        float[] climateNativeFlat = withLatitudeBias(out[1], i1p, nH, nW, scale);
 
         // Bilinear upsample elevation: (nH, nW) → (nH*scale, nW*scale)
         float[][] elevNative2D = to2D(elevNativeFlat, nH, nW);
@@ -607,7 +631,13 @@ public final class LocalTerrainProvider {
         List<RiverRegions.Region> regions;
         try {
             regions = RiverRegions.forBlockWindow(i1, j1, i1 + height, j1 + width, scale,
-                    regionSize, params, (a, b, c, d) -> pipeline.get(a, b, c, d, true));
+                    regionSize, params, (a, b, c, d) -> {
+                        // Same latitude band as every other climate consumer, so frozen
+                        // rivers and cold-priced springs agree with the biomes above them.
+                        float[][] o = pipeline.get(a, b, c, d, true);
+                        o[1] = withLatitudeBias(o[1], a, c - a, d - b, scale);
+                        return o;
+                    });
         } catch (Exception e) {
             LOG.warn("River paths unavailable for tile ({}, {}): {}", j1, i1, e.toString());
             return;
@@ -638,7 +668,7 @@ public final class LocalTerrainProvider {
         // mouth size. A tributary reaching a bigger river finds those cells already wet
         // at the lower surface, so its own water stops at the join and steps down like a
         // little waterfall, instead of riding out over the river on its higher surface.
-        stampLakes(regions, elev, waterFlat, riverClassFlat, i1, j1, height, width,
+        stampLakes(regions, elev, waterFlat, riverClassFlat, temperature, i1, j1, height, width,
                 metresPerBlock, freeboardMetres, params.lakeDepthBlocks, scale);
         // Before the rivers, so a channel crossing a fringe stamps itself back on top.
         stampLakeFringes(regions, elev, biomeFlat, climate, waterFlat, i1, j1, height, width,
@@ -819,7 +849,7 @@ public final class LocalTerrainProvider {
      * lake.
      */
     private static void stampLakes(List<RiverRegions.Region> regions, float[] elev,
-                                   float[] waterFlat, byte[] riverClassFlat,
+                                   float[] waterFlat, byte[] riverClassFlat, float[] temperature,
                                    int i1, int j1, int height, int width,
                                    float metresPerBlock, float freeboardMetres,
                                    float lakeDepthBlocks, int scale) {
@@ -845,6 +875,11 @@ public final class LocalTerrainProvider {
                         }
                         // Slack class, so the bed pass gives lake floors sand and clay.
                         if (riverClassFlat != null && riverClassFlat[idx] == 0) riverClassFlat[idx] = 1;
+                        // Severe cold closes a lake completely, same as the rivers.
+                        if (riverClassFlat != null && temperature != null
+                                && temperature[idx] < RiverCarver.FULL_FREEZE_C) {
+                            riverClassFlat[idx] |= RiverCarver.FULLY_FROZEN_BIT;
+                        }
                     }
                 }
 

@@ -7,6 +7,7 @@ import com.github.xandergos.terraindiffusionmc.pipeline.WorldPipelineModelConfig
 import com.github.xandergos.terraindiffusionmc.pipeline.river.CoarseHydrology;
 import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverNetwork;
 import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverRegions;
+import com.github.xandergos.terraindiffusionmc.world.LatitudeParameters;
 import com.github.xandergos.terraindiffusionmc.world.RiverMode;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleManager;
 import com.google.gson.Gson;
@@ -601,6 +602,17 @@ public final class ExplorerServer {
             float raw = (w > 1e-8f) ? slice.data[channel * H * W + i] / w : 0f;
             // Channels 0 (elev) and 1 (p5): signed-sqrt → real units via sign(v)*v^2
             result[i] = (channel <= 1) ? (float) (Math.signum(raw) * raw * raw) : raw;
+        }
+
+        // The detail views read climate through the banded pipeline fetch; the raw
+        // coarse temperature must carry the same latitude wave or the two maps disagree.
+        if (channel == 2) {
+            LatitudeParameters lat = WorldScaleManager.getLatitudeParameters();
+            int scale = WorldScaleManager.getCurrentScale();
+            for (int r = 0; r < H; r++) {
+                float bias = lat.temperatureBiasAt(((ci0 + r) * 256.0 + 128.0) * scale);
+                for (int c = 0; c < W; c++) result[r * W + c] += bias;
+            }
         }
         return result;
     }

@@ -1,6 +1,7 @@
 package com.github.xandergos.terraindiffusionmc.client;
 
 import com.github.xandergos.terraindiffusionmc.world.CaveParameters;
+import com.github.xandergos.terraindiffusionmc.world.LatitudeParameters;
 import com.github.xandergos.terraindiffusionmc.world.RiverMode;
 import com.github.xandergos.terraindiffusionmc.world.RiverParameters;
 import com.github.xandergos.terraindiffusionmc.world.WorldScaleManager;
@@ -37,6 +38,10 @@ public final class WorldScaleSettingsScreen extends Screen {
     private static final Component CAVE_ERROR_TEXT = Component.literal("Cave settings must be whole numbers")
             .withStyle(ChatFormatting.RED);
 
+    private static final Component CLIMATE_LABEL_TEXT = Component.literal("Climate");
+    private static final Component CLIMATE_ERROR_TEXT = Component.literal("Climate settings must be whole numbers")
+            .withStyle(ChatFormatting.RED);
+
     private final Screen parentScreen;
     private EditBox scaleTextField;
     private StringWidget validationTextWidget;
@@ -54,6 +59,9 @@ public final class WorldScaleSettingsScreen extends Screen {
     private EditBox riverBedReliefField;
     private EditBox caveSmallSealField;
     private EditBox caveLargeSealField;
+    private EditBox latitudePoleDistanceField;
+    private EditBox latitudeStartField;
+    private EditBox latitudeStrengthField;
 
     public WorldScaleSettingsScreen(Screen parentScreen) {
         super(Component.translatable("terrain-diffusion-mc.world_settings.title"));
@@ -79,10 +87,11 @@ public final class WorldScaleSettingsScreen extends Screen {
         this.addRenderableWidget(scaleTextField);
         this.setInitialFocus(scaleTextField);
 
-        // Rivers fill a block of fields on the left, caves theirs on the right, so the
-        // screen stays short enough to never need scrolling.
-        int riversCenter = centerX - 88;
-        int cavesCenter = centerX + 88;
+        // Each category fills its own column of fields, so the screen stays short
+        // enough to never need scrolling.
+        int riversCenter = centerX - 160;
+        int cavesCenter = centerX;
+        int climateCenter = centerX + 160;
 
         addCenteredTextWidget(RIVER_LABEL_TEXT, riversCenter, centerY - 82, 0xFFFFFF);
 
@@ -98,7 +107,7 @@ public final class WorldScaleSettingsScreen extends Screen {
         this.addRenderableWidget(riverModeButton);
 
         RiverParameters p = WorldScaleSelectionState.getPendingRiverParametersOrDefault();
-        int left = riversCenter - 78, right = riversCenter + 6;
+        int left = riversCenter - 75, right = riversCenter + 3;
         riverRarityField = addLabeledField(left, centerY - 38, "Rarity", String.valueOf(p.mainChannelCells),
                 "How much land must drain together before a river forms at all. "
                         + "Higher: fewer, rarer rivers. Lower: rivers everywhere.");
@@ -134,7 +143,7 @@ public final class WorldScaleSettingsScreen extends Screen {
         addCenteredTextWidget(CAVE_LABEL_TEXT, cavesCenter, centerY - 82, 0xFFFFFF);
 
         CaveParameters c = WorldScaleSelectionState.getPendingCaveParametersOrDefault();
-        int cavesLeft = cavesCenter - 78, cavesRight = cavesCenter + 6;
+        int cavesLeft = cavesCenter - 75, cavesRight = cavesCenter + 3;
         caveSmallSealField = addLabeledField(cavesLeft, centerY - 38, "Tunnel cover", String.valueOf(c.smallSealBlocks),
                 "How deep small cave tunnels and ravines must stay below gentle ground, in "
                         + "blocks. They still surface in craggy or rocky country. "
@@ -143,6 +152,25 @@ public final class WorldScaleSettingsScreen extends Screen {
                 "How deep big caverns and their wide mouths must stay below the surface, in "
                         + "blocks. Rare mouths still open in crevasse, karst and canyon country. "
                         + "0: big openings appear anywhere, like vanilla.");
+
+        addCenteredTextWidget(CLIMATE_LABEL_TEXT, climateCenter, centerY - 82, 0xFFFFFF);
+
+        LatitudeParameters lat = WorldScaleSelectionState.getPendingLatitudeParametersOrDefault();
+        int climateLeft = climateCenter - 75, climateRight = climateCenter + 3;
+        latitudePoleDistanceField = addLabeledField(climateLeft, centerY - 38, "Pole distance",
+                String.valueOf(lat.equatorPoleBlocks),
+                "Blocks between the equator and a pole. The bands repeat forever, so "
+                        + "travelling past a pole starts warming again. Higher: broad climate "
+                        + "belts and long journeys. Lower: quick change with travel.");
+        latitudeStartField = addLabeledField(climateRight, centerY - 38, "Start latitude",
+                String.valueOf(lat.startLatitudeDeg),
+                "Where the spawn sits between the equator (0) and the north pole (90). "
+                        + "At the default 45, south is warmer and north is colder.");
+        latitudeStrengthField = addLabeledField(climateLeft, centerY - 8, "Band strength",
+                String.valueOf(lat.bandStrengthC),
+                "How strongly latitude sways temperature, in degrees Celsius at the equator "
+                        + "and poles. Around 25 gives frozen poles and tropical equator. "
+                        + "0: no banding, climate ignores position as before.");
 
         this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> onDonePressed())
                 .bounds(centerX - BUTTON_WIDTH - 5, centerY + 116, BUTTON_WIDTH, BUTTON_HEIGHT)
@@ -251,11 +279,23 @@ public final class WorldScaleSettingsScreen extends Screen {
                 return;
             }
 
+            LatitudeParameters latitudeParameters;
+            try {
+                latitudeParameters = new LatitudeParameters(
+                        Integer.parseInt(latitudePoleDistanceField.getValue().trim()),
+                        Integer.parseInt(latitudeStartField.getValue().trim()),
+                        Integer.parseInt(latitudeStrengthField.getValue().trim()));
+            } catch (NumberFormatException exception) {
+                validationTextWidget.setMessage(CLIMATE_ERROR_TEXT);
+                return;
+            }
+
             applyWorldHeightForScale(selectedScale);
             WorldScaleSelectionState.setPendingScale(selectedScale);
             WorldScaleSelectionState.setPendingRiverMode(riverMode);
             WorldScaleSelectionState.setPendingRiverParameters(riverParameters);
             WorldScaleSelectionState.setPendingCaveParameters(caveParameters);
+            WorldScaleSelectionState.setPendingLatitudeParameters(latitudeParameters);
             onClose();
         } catch (NumberFormatException exception) {
             validationTextWidget.setMessage(ERROR_TEXT);

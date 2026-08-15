@@ -25,8 +25,24 @@ public final class WorldScaleSettingsState extends SavedData {
             RiverParametersCodec.CODEC.optionalFieldOf("river_parameters", RiverParameters.DEFAULT)
                     .forGetter(state -> state.riverParameters),
             CaveParametersCodec.CODEC.optionalFieldOf("cave_parameters", CaveParameters.DEFAULT)
-                    .forGetter(state -> state.caveParameters)
+                    .forGetter(state -> state.caveParameters),
+            // Falls back to OFF, not DEFAULT: a world explored without banding must not
+            // grow climate seams when the field is missing from its save.
+            LatitudeParametersCodec.CODEC.optionalFieldOf("latitude_parameters", LatitudeParameters.OFF)
+                    .forGetter(state -> state.latitudeParameters)
     ).apply(instance, WorldScaleSettingsState::new));
+
+    /** Nested for the same builder-field-limit reason as the river codec. */
+    private static final class LatitudeParametersCodec {
+        static final Codec<LatitudeParameters> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.INT.optionalFieldOf("equator_pole_blocks", LatitudeParameters.DEFAULT_EQUATOR_POLE_BLOCKS)
+                        .forGetter(p -> p.equatorPoleBlocks),
+                Codec.INT.optionalFieldOf("start_latitude", LatitudeParameters.DEFAULT_START_LATITUDE_DEG)
+                        .forGetter(p -> p.startLatitudeDeg),
+                Codec.INT.optionalFieldOf("band_strength", LatitudeParameters.DEFAULT_BAND_STRENGTH_C)
+                        .forGetter(p -> p.bandStrengthC)
+        ).apply(instance, LatitudeParameters::new));
+    }
 
     /** Nested for the same builder-field-limit reason as the river codec. */
     private static final class CaveParametersCodec {
@@ -69,22 +85,25 @@ public final class WorldScaleSettingsState extends SavedData {
     private RiverMode riverMode;
     private RiverParameters riverParameters;
     private CaveParameters caveParameters;
+    private LatitudeParameters latitudeParameters;
 
     /**
      * Creates a default state for worlds that do not yet have saved terrain diffusion settings.
      */
     private WorldScaleSettingsState(int configuredScale, boolean hasExplicitScale, String riverModeId,
-                                    RiverParameters riverParameters, CaveParameters caveParameters) {
+                                    RiverParameters riverParameters, CaveParameters caveParameters,
+                                    LatitudeParameters latitudeParameters) {
         this.scale = WorldScaleManager.clampScale(configuredScale);
         this.explicitScale = hasExplicitScale;
         this.riverMode = RiverMode.byId(riverModeId);
         this.riverParameters = riverParameters;
         this.caveParameters = caveParameters;
+        this.latitudeParameters = latitudeParameters;
     }
 
     public static WorldScaleSettingsState createDefault() {
         return new WorldScaleSettingsState(WorldScaleManager.DEFAULT_SCALE, false, RiverMode.DEFAULT.id(),
-                RiverParameters.DEFAULT, CaveParameters.DEFAULT);
+                RiverParameters.DEFAULT, CaveParameters.DEFAULT, LatitudeParameters.DEFAULT);
     }
 
     public RiverMode getRiverMode() {
@@ -111,6 +130,15 @@ public final class WorldScaleSettingsState extends SavedData {
 
     public void setCaveParameters(CaveParameters parameters) {
         this.caveParameters = parameters;
+        setDirty();
+    }
+
+    public LatitudeParameters getLatitudeParameters() {
+        return latitudeParameters;
+    }
+
+    public void setLatitudeParameters(LatitudeParameters parameters) {
+        this.latitudeParameters = parameters;
         setDirty();
     }
 

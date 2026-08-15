@@ -3,6 +3,7 @@ package com.github.xandergos.terraindiffusionmc.world;
 import com.github.xandergos.terraindiffusionmc.config.TerrainDiffusionConfig;
 import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider;
 import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider.HeightmapData;
+import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverCarver;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
@@ -47,6 +48,7 @@ public final class RiverWaterFiller {
             .setValue(LiquidBlock.LEVEL, 1);
     private static final BlockState FALLING = Blocks.WATER.defaultBlockState()
             .setValue(LiquidBlock.LEVEL, 8);
+    private static final BlockState ICE = Blocks.ICE.defaultBlockState();
     private static final BlockState STONE = Blocks.STONE.defaultBlockState();
     private static final BlockState COBBLESTONE = Blocks.COBBLESTONE.defaultBlockState();
     private static final BlockState GRAVEL = Blocks.GRAVEL.defaultBlockState();
@@ -126,12 +128,15 @@ public final class RiverWaterFiller {
                 int topWaterY = HeightConverter.convertToMinecraftHeight(metres) - 1;
                 pos.set(minBlockX + dx, topWaterY, minBlockZ + dz);
 
+                // Severe cold closes the surface bank to bank; the water lives on below
+                // the ice, as it does under a real winter river.
+                boolean frozenOver = fullyFrozen(data, localX, localZ);
                 for (int filled = 0; filled < MAX_FILL_DEPTH; filled++) {
                     int y = topWaterY - filled;
                     if (y <= minY) break;
                     pos.setY(y);
                     if (!chunk.getBlockState(pos).isAir()) break;
-                    chunk.setBlockState(pos, WATER, false);
+                    chunk.setBlockState(pos, filled == 0 && frozenOver ? ICE : WATER, false);
                 }
             }
         }
@@ -224,9 +229,16 @@ public final class RiverWaterFiller {
                 int t = top[i];
                 if (t == Integer.MIN_VALUE) continue;
 
-                // A shallow fringe column may hold no actual water; nothing to slope from.
+                // A frozen-over column takes solid ice at its steps: flowing water cannot
+                // carry ice, so the falls and ramps freeze whole instead of stepping.
+                boolean frozenOver = fullyFrozen(data, localX, localZ);
+
+                // A shallow fringe column may hold no actual water or ice; nothing to
+                // slope from.
                 pos.set(minBlockX + dx, t, minBlockZ + dz);
-                if (!chunk.getBlockState(pos).getFluidState().isSource()) continue;
+                BlockState topState = chunk.getBlockState(pos);
+                if (frozenOver ? !topState.is(Blocks.ICE)
+                        : !topState.getFluidState().isSource()) continue;
 
                 int highest = maxNeighbourTop(top, i, h, w);
                 if (highest > t) {
@@ -235,18 +247,26 @@ public final class RiverWaterFiller {
                     for (int y = highest; y > t; y--) {
                         pos.setY(y);
                         if (!chunk.getBlockState(pos).isAir()) break;
-                        chunk.setBlockState(pos, y == highest ? FLOWING : FALLING, false);
+                        chunk.setBlockState(pos, frozenOver ? ICE
+                                : y == highest ? FLOWING : FALLING, false);
                     }
                 } else if (lvl[i] >= 2 && lvl[i] <= 7) {
                     // Ramp sheet thinning away across the pool.
                     pos.setY(t + 1);
                     if (chunk.getBlockState(pos).isAir()) {
-                        chunk.setBlockState(pos, Blocks.WATER.defaultBlockState()
-                                .setValue(LiquidBlock.LEVEL, lvl[i]), false);
+                        chunk.setBlockState(pos, frozenOver ? ICE
+                                : Blocks.WATER.defaultBlockState()
+                                        .setValue(LiquidBlock.LEVEL, lvl[i]), false);
                     }
                 }
             }
         }
+    }
+
+    /** Whether the carver marked this column's water as frozen over completely. */
+    private static boolean fullyFrozen(HeightmapData data, int localX, int localZ) {
+        return data.riverClass != null
+                && (data.riverClass[localZ][localX] & RiverCarver.FULLY_FROZEN_BIT) != 0;
     }
 
     private static int maxNeighbourTop(int[] top, int i, int h, int w) {
@@ -293,7 +313,7 @@ public final class RiverWaterFiller {
 
                 byte cls = data.riverClass[localZ][localX];
                 if (cls == 0) continue;
-                float steep = (cls - 1) / 100f;
+                float steep = ((cls & RiverCarver.CLASS_MASK) - 1) / 100f;
 
                 int x = minBlockX + dx;
                 int z = minBlockZ + dz;
@@ -387,6 +407,10 @@ public final class RiverWaterFiller {
         if (metres == HeightmapData.NO_WATER) return true;
         short biome = data.biomeIds[localZ][localX];
         if (biome != 36 && biome != 37) return true;
+
+        // Frozen over completely: the surface is already solid ice, so neither the
+        // near-drop veto nor the bank dither has anything left to shape.
+        if (fullyFrozen(data, localX, localZ)) return true;
 
         int myTop = HeightConverter.convertToMinecraftHeight(metres) - 1;
         int bankDist = Integer.MAX_VALUE;

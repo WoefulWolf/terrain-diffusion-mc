@@ -41,6 +41,18 @@ public final class RiverCarver {
      */
     private static final float MOUTH_WET_RELAX_BLOCKS = 3f;
 
+    /**
+     * Below this mean temperature a river freezes over completely: ice bank to bank,
+     * steps and falls solid, instead of the bank-inward margin milder cold gets. Rivers
+     * with real current keep an open channel well under zero; only severe subarctic
+     * means close them.
+     */
+    public static final float FULL_FREEZE_C = -20f;
+    /** High bit of a riverClass byte: this cell's water is fully frozen over. */
+    public static final int FULLY_FROZEN_BIT = 0x80;
+    /** The steepness class lives in the low seven bits. */
+    public static final int CLASS_MASK = 0x7F;
+
     private RiverCarver() {
     }
 
@@ -153,8 +165,9 @@ public final class RiverCarver {
                     float stepWetCut = surface < MOUTH_WET_RELAX_BLOCKS * metresPerBlock
                             ? wetCut * fade : wetCut;
                     boolean wet = elev[idx] < surface - stepWetCut;
-                    if (riverClass != null && (lowered || wet) && cls > riverClass[idx]) {
-                        riverClass[idx] = cls;
+                    if (riverClass != null && (lowered || wet)
+                            && cls > (riverClass[idx] & CLASS_MASK)) {
+                        riverClass[idx] = (byte) ((riverClass[idx] & FULLY_FROZEN_BIT) | cls);
                     }
                     if (!wet) continue;
 
@@ -167,6 +180,10 @@ public final class RiverCarver {
                     if (biomeIds != null) {
                         boolean frozen = temperature != null && temperature[idx] < 0f;
                         biomeIds[idx] = frozen ? frozenRiverId : riverId;
+                    }
+                    if (riverClass != null && temperature != null
+                            && temperature[idx] < FULL_FREEZE_C) {
+                        riverClass[idx] |= FULLY_FROZEN_BIT;
                     }
                 }
             }

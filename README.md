@@ -37,6 +37,7 @@ Where vanilla convention and real-world logic disagree, this fork picks the real
 - **Green river corridors.** Rivers water their margins, so a channel meandering through desert, savanna or badlands carries a ribbon of greenery — grass and acacias through sand, gallery forest through savanna — sized to the river and only where the bank sits within a few blocks of the water. A river that has cut itself a deep canyon leaves its stone walls bare.
 - **Marshy deltas.** A big slack river reaching the sea drops its sediment: the flats around the mouth silt over into swamp — mangrove where it is hot — rather than staying sandy beach. Steep or small mouths keep their sand and waterfalls.
 - **Lake margins.** Where warm, wet lowland meets a lake at nearly its own level, the shore turns to swamp fringe.
+- **Latitude.** A temperature wave runs north-south: warmest at the equator, coldest at the poles, matching Earth's roughly 50-degree swing in annual means. Spawn sits at 45° north by default, so travelling south grows warmer and north colder, with near-certain frozen ice caps at the poles and tropics along the equator. The bands repeat, so crossing a pole eventually warms again. Distance, spawn latitude, and strength are per-world settings; strength 0 turns it off.
 
 ### Cave systems
 
@@ -51,7 +52,7 @@ Rivers are traced from a real drainage analysis of the terrain itself: rainfall 
 - **Follows the terrain** — rivers run down real valleys, collect tributaries at true confluences, and end in the ocean or a lake. Steep reaches cut narrow and deep with rapids and waterfalls; slack reaches spread wide and shallow and meander.
 - **Real water at any altitude** — channels hold actual water at their own elevation, not just sea level, with flowing steps and falling sheets at every drop. Ocean mouths shoal over a bar and fan into the shelf like a delta.
 - **Lakes** — basins large enough to matter fill with standing water; rivers flow in, cross, and continue out the outlet. Shorelines get natural climb-out spots.
-- **Beds and banks by current** — fast water runs over stone, cobblestone and gravel with rocky banks; slow water over sand, dirt and clay with grassy edges. Frozen rivers freeze from the banks inward and keep an open flowing centre, with no ice near rapids.
+- **Beds and banks by current** — fast water runs over stone, cobblestone and gravel with rocky banks; slow water over sand, dirt and clay with grassy edges. Frozen rivers freeze from the banks inward and keep an open flowing centre, with no ice near rapids — until deep subarctic cold, below about −20 °C, closes them bank to bank: solid ice surface, frozen falls, no open water at all.
 - **Plays well with the rest of generation** — cave carvers and ravines stop short of channels instead of cutting dry gashes through them, and villages build over rivers at water level rather than sinking houses into them.
 - Wetted channels are real `river` / `frozen_river` biome, so vanilla features, spawns, and biome-keyed mods apply.
 
@@ -164,6 +165,8 @@ For Terrain Diffusion worlds, click **Customize** in world creation. Everything 
 Below the mode sit ten river parameters — rarity, source size, maximum width and depth, width growth, bank height, lake size and depth, bank wobble, and bed relief. Every field has a hover tooltip explaining in plain terms what raising or lowering it does; the defaults are the tuned values.
 
 **Caves**: two cover depths control how far below the surface caves must stay in gentle country — one for small tunnels and ravines, one for big caverns and their wide mouths. Craggy, rocky, and karst-like country still opens as described above. Set a field to `0` to switch that gate off and let those breaks appear anywhere, the way vanilla generates.
+
+**Climate**: pole distance (blocks from equator to pole, default 30,000 — the north pole is a 15,000-block trek from a default spawn, about 45 minutes of sprinting), start latitude (0 equator to 90 north pole, default 45), and band strength (°C at the extremes, default 25; `0` disables latitude banding). Worlds created before this feature keep banding off.
 
 ## Common Issues
 

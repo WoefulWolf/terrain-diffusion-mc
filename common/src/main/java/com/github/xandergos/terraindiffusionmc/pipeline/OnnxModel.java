@@ -168,12 +168,22 @@ public final class OnnxModel implements AutoCloseable {
                             "inference.offload_models=false is not supported with CoreML. " +
                             "Set inference.offload_models=true in terrain-diffusion-mc.properties.");
                 }
-                this.gpuSession = env.createSession(modelBytes, sessionOptions);
+                try {
+                    this.gpuSession = env.createSession(modelBytes, sessionOptions);
+                } catch (OrtException creationFailure) {
+                    // Most likely out of VRAM. Falling back to slot swapping keeps the
+                    // world generating, just slower, instead of taking the mod down.
+                    LOG.warn("Could not keep ONNX model '{}' resident on the GPU ({}); " +
+                            "falling back to on-demand loading", name, creationFailure.getMessage());
+                    this.gpuSession = null;
+                }
             }
             this.cpuSession = null;
-            LOG.info("ONNX model '{}' loaded on GPU ({} KB) in {} ms",
-                    name, modelBytes.length / 1024, System.currentTimeMillis() - startMillis);
-            return;
+            if (this.gpuSession != null) {
+                LOG.info("ONNX model '{}' loaded on GPU ({} KB) in {} ms",
+                        name, modelBytes.length / 1024, System.currentTimeMillis() - startMillis);
+                return;
+            }
         }
         this.cpuSession = null;
         this.gpuSession = null;

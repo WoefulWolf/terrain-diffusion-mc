@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -72,7 +73,10 @@ public final class WorldPipeline implements AutoCloseable {
     private volatile long seed;
 
     private final MemoryTileStore tileStore;
-    private final long cacheLimitBytes = 100L * 1024 * 1024;
+    // Sized so the prefetcher can hold a full 3x3 region neighbourhood of windows
+    // without evicting any of it: a window evicted too early is seconds of inference
+    // done over, against megabytes held.
+    private final long cacheLimitBytes = 256L * 1024 * 1024;
 
     final InfiniteTensor coarse;
     final InfiniteTensor latents;
@@ -227,18 +231,21 @@ public final class WorldPipeline implements AutoCloseable {
         float[] ww = linearWeightWindow(S);
         float tInit = (float) Math.atan(EDMScheduler.SIGMA_MAX / SIGMA_DATA);
 
+        // Sixteen windows share one GPU dispatch. At 64x64 the dispatch overhead
+        // outweighs the convolutions themselves, so a window in a full batch costs a
+        // fraction of one sent alone.
         InfiniteTensor initLatent = tileStore.getOrCreateBatched(
                 "init_latent_map", new Integer[]{6, null, null},
                 (wis, args) -> latentBatch(wis, null, args.get(0), tInit, 5819, ww),
                 outWin, new InfiniteTensor[]{coarse}, new TensorWindow[]{coarseWin},
-                cacheLimitBytes, 4);
+                cacheLimitBytes, 16);
 
         float interT = (float) Math.atan(0.35f / SIGMA_DATA);
         return tileStore.getOrCreateBatched(
                 "step_latent_map_0", new Integer[]{6, null, null},
                 (wis, args) -> latentBatch(wis, args.get(0), args.get(1), interT, 5820, ww),
                 outWin, new InfiniteTensor[]{initLatent, coarse}, new TensorWindow[]{outWin, coarseWin},
-                cacheLimitBytes, 4);
+                cacheLimitBytes, 16);
     }
 
     private List<FloatTensor> latentBatch(List<int[]> wis, List<FloatTensor> prevSamples,
@@ -380,51 +387,71 @@ public final class WorldPipeline implements AutoCloseable {
         float[] ww = linearWeightWindow(S);
         float t = (float) Math.atan(EDMScheduler.SIGMA_MAX / SIGMA_DATA);
 
-        return tileStore.getOrCreate("init_residual_map", new Integer[]{2, null, null},
-                (wi, args) -> decoderTile(wi, args.get(0), t, ww),
-                outWin, new InfiniteTensor[]{latents}, new TensorWindow[]{inpWin}, cacheLimitBytes);
+        return tileStore.getOrCreateBatched("init_residual_map", new Integer[]{2, null, null},
+                (wis, args) -> decoderBatch(wis, args.get(0), t, ww),
+                outWin, new InfiniteTensor[]{latents}, new TensorWindow[]{inpWin}, cacheLimitBytes, 8);
     }
 
-    private FloatTensor decoderTile(int[] wi, FloatTensor latentSlice, float t, float[] ww) {
+    private List<FloatTensor> decoderBatch(List<int[]> wis, List<FloatTensor> latentSlices,
+                                           float t, float[] ww) {
         int S = DECODER_TILE_SIZE, ST = DECODER_TILE_STRIDE, lc = LATENT_COMPRESSION;
         int Slc = S / lc;
-        int i1 = wi[1] * ST, j1 = wi[2] * ST;
+        int batch = wis.size();
         float cosT = (float) Math.cos(t), sinT = (float) Math.sin(t);
 
-        // Unnormalize latents channels 0..3 (4 channels)
-        float[] latFlat = new float[4 * Slc * Slc];
-        for (int ch = 0; ch < 4; ch++)
-            for (int px = 0; px < Slc * Slc; px++) {
-                float w = latentSlice.data[5 * Slc * Slc + px];
-                latFlat[ch * Slc * Slc + px] = (w > 1e-6f) ? latentSlice.data[ch * Slc * Slc + px] / w : 0f;
-            }
+        float[][] xTArr = new float[batch][];
+        float[] modelInBatch = new float[batch * 5 * S * S];
 
-        // Nearest-neighbor upsample (4, Slc, Slc) → (4, S, S)
-        float[] upsampled = nearestUpsample(latFlat, 4, Slc, Slc, S, S);
+        for (int b = 0; b < batch; b++) {
+            int[] wi = wis.get(b);
+            int i1 = wi[1] * ST, j1 = wi[2] * ST;
+            FloatTensor latentSlice = latentSlices.get(b);
 
-        // One flow-matching step (sample starts at zero)
-        float[] noise = flatten3D(GaussianNoisePatch.generate(seed + 5819, i1, j1, S, S, 1, S, S));
-        float[] xT = new float[S * S];
-        for (int k = 0; k < S * S; k++) xT[k] = sinT * noise[k] * SIGMA_DATA;  // sample=0
+            // Unnormalize latents channels 0..3 (4 channels)
+            float[] latFlat = new float[4 * Slc * Slc];
+            for (int ch = 0; ch < 4; ch++)
+                for (int px = 0; px < Slc * Slc; px++) {
+                    float w = latentSlice.data[5 * Slc * Slc + px];
+                    latFlat[ch * Slc * Slc + px] = (w > 1e-6f) ? latentSlice.data[ch * Slc * Slc + px] / w : 0f;
+                }
 
-        // model_in = concat([xT/sigma_data (1,S,S), upsampled (4,S,S)]) → (5,S,S)
-        float[] modelIn = new float[5 * S * S];
-        for (int k = 0; k < S * S; k++) modelIn[k] = xT[k] / SIGMA_DATA;
-        System.arraycopy(upsampled, 0, modelIn, S * S, 4 * S * S);
+            // Nearest-neighbor upsample (4, Slc, Slc) → (4, S, S)
+            float[] upsampled = nearestUpsample(latFlat, 4, Slc, Slc, S, S);
 
-        LOG.debug("Decoder model called for chunk ({}, {}) tile pixels [{}, {}]-[{}, {}]", wi[1], wi[2], i1, j1, i1 + S, j1 + S);
-        float[] rawPred = decoderModel.runModel(modelIn, new long[]{1, 5, S, S}, new float[]{t}, null, null);
+            // One flow-matching step (sample starts at zero)
+            float[] noise = flatten3D(GaussianNoisePatch.generate(seed + 5819, i1, j1, S, S, 1, S, S));
+            float[] xT = new float[S * S];
+            for (int k = 0; k < S * S; k++) xT[k] = sinT * noise[k] * SIGMA_DATA;  // sample=0
+            xTArr[b] = xT;
+
+            // model_in = concat([xT/sigma_data (1,S,S), upsampled (4,S,S)]) → (5,S,S)
+            int off = b * 5 * S * S;
+            for (int k = 0; k < S * S; k++) modelInBatch[off + k] = xT[k] / SIGMA_DATA;
+            System.arraycopy(upsampled, 0, modelInBatch, off + S * S, 4 * S * S);
+        }
+
+        String chunkList = wis.stream().map(w -> "(" + w[1] + "," + w[2] + ")").collect(Collectors.joining(", "));
+        LOG.debug("Decoder model called for {} chunks: {}", batch, chunkList);
+
+        float[] noiseLabels = new float[batch];
+        Arrays.fill(noiseLabels, t);
+        float[] predBatch = decoderModel.runModel(
+                modelInBatch, new long[]{batch, 5, S, S}, noiseLabels, null, null);
 
         // sample = cos(t)*xT - sin(t)*sigma_data*(-rawPred); then / sigma_data
-        float[] newSample = new float[S * S];
-        for (int k = 0; k < S * S; k++) {
-            float pred = -rawPred[k];  // decoder model output is negated
-            newSample[k] = (cosT * xT[k] - sinT * SIGMA_DATA * pred) / SIGMA_DATA;
+        List<FloatTensor> results = new ArrayList<>(batch);
+        for (int b = 0; b < batch; b++) {
+            float[] xT = xTArr[b];
+            FloatTensor result = new FloatTensor(new int[]{2, S, S});
+            for (int k = 0; k < S * S; k++) {
+                float pred = -predBatch[b * S * S + k];  // decoder model output is negated
+                float sample = (cosT * xT[k] - sinT * SIGMA_DATA * pred) / SIGMA_DATA;
+                result.data[k] = sample * ww[k];
+            }
+            System.arraycopy(ww, 0, result.data, S * S, S * S);
+            results.add(result);
         }
-        FloatTensor result = new FloatTensor(new int[]{2, S, S});
-        for (int px = 0; px < S * S; px++) result.data[px] = newSample[px] * ww[px];
-        System.arraycopy(ww, 0, result.data, S * S, S * S);
-        return result;
+        return results;
     }
 
     // =========================================================================
@@ -460,6 +487,37 @@ public final class WorldPipeline implements AutoCloseable {
         int H = i2 - i1, W = j2 - j1;
         float[] climate = withClimate ? computeClimate(i1, j1, i2, j2, elevFlat, H, W) : null;
         return new float[][]{elevFlat, climate};
+    }
+
+    /** Prefetch stages, ordered upstream to downstream. */
+    public enum Stage { COARSE, LATENTS, RESIDUAL }
+
+    /**
+     * Computes and caches every model window one stage needs for a native-pixel window,
+     * without assembling any output. Ensuring a stage pulls its upstream dependencies in
+     * grouped runs, so a prefetch pass that goes coarse, then latents, then residual keeps
+     * each model resident for its whole pass instead of swapping per window — with model
+     * offloading a session swap costs seconds, so the grouping is most of the point.
+     */
+    public void prewarm(Stage stage, int i1, int j1, int i2, int j2) {
+        int lc = LATENT_COMPRESSION;
+        switch (stage) {
+            case COARSE -> {
+                // The same coarse span computeClimate reads for this window.
+                int S = 32 * lc;
+                int pad = 8;
+                coarse.ensure(new int[]{0, Math.floorDiv(i1, S) - pad, Math.floorDiv(j1, S) - pad},
+                        new int[]{7, -Math.floorDiv(-i2, S) + pad, -Math.floorDiv(-j2, S) + pad});
+            }
+            // Pads cover computeElev's blur halo (six lowres pixels plus grid alignment),
+            // so a prewarmed window leaves the real fetch nothing new to compute.
+            case LATENTS -> latents.ensure(
+                    new int[]{0, Math.floorDiv(i1, lc) - 8, Math.floorDiv(j1, lc) - 8},
+                    new int[]{6, -Math.floorDiv(-i2, lc) + 8, -Math.floorDiv(-j2, lc) + 8});
+            case RESIDUAL -> residual.ensure(
+                    new int[]{0, i1 - 64, j1 - 64},
+                    new int[]{2, i2 + 64, j2 + 64});
+        }
     }
 
     // =========================================================================

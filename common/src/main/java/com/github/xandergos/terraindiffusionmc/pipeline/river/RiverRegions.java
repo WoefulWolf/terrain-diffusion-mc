@@ -37,8 +37,8 @@ public final class RiverRegions {
         SMALL(256, 64),
         LARGE(768, 192);
 
-        final int side;
-        final int halo;
+        public final int side;
+        public final int halo;
 
         Size(int side, int halo) {
             this.side = side;
@@ -163,6 +163,22 @@ public final class RiverRegions {
         CACHE.clear();
     }
 
+    /** Region grid index of a block coordinate, for planning prefetches. */
+    public static int regionIndex(int block, int scale, Size size) {
+        return Math.floorDiv(block, size.side * scale);
+    }
+
+    /** True when a region is already built and cached. */
+    public static boolean isCached(int ri, int rj, Size size) {
+        return CACHE.containsKey(cacheKey(ri, rj, size));
+    }
+
+    /** Builds and caches exactly one region, for the idle prefetcher. */
+    public static void prebuild(int ri, int rj, int scale, Size size, RiverParameters params,
+                                FineSource source) {
+        region(ri, rj, scale, size, params, source);
+    }
+
     /**
      * Every region whose analysis reaches a block-space window.
      *
@@ -188,10 +204,14 @@ public final class RiverRegions {
         return out;
     }
 
+    /** Region grids of different sizes must not share cache entries. */
+    private static long cacheKey(int ri, int rj, Size size) {
+        return ((long) ri << 33) ^ ((long) rj << 1) ^ size.ordinal();
+    }
+
     private static Region region(int ri, int rj, int scale, Size size, RiverParameters params,
                                  FineSource source) {
-        // Region grids of different sizes must not share cache entries.
-        long key = ((long) ri << 33) ^ ((long) rj << 1) ^ size.ordinal();
+        long key = cacheKey(ri, rj, size);
         Region cached = CACHE.get(key);
         if (cached != null) return cached;
 

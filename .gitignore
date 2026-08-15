@@ -126,3 +126,5 @@ bin/
 libs/
 mise.toml
 /docs
+/.cuda-runtime
+/.fp16

@@ -21,9 +21,11 @@ import java.util.Comparator;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -82,17 +84,60 @@ public final class LocalTerrainProvider {
     private static record CacheKey(int i1, int j1, int i2, int j2) {}
     private static record CacheEntry(HeightmapData data, AtomicLong lastAccessed) {}
 
-    private static final int MAX_CACHE_SIZE = 64;
+    // Sized so the prefetcher's tile ring never evicts what the workers are reading;
+    // a tile is under half a megabyte, so this is cheap insurance.
+    private static final int MAX_CACHE_SIZE = 128;
     private static final int MAX_CACHE_SIZE_HEADROOM = 8;
     private static final Map<CacheKey, CacheEntry> CACHE = new ConcurrentHashMap<>();
     private static final AtomicLong CACHE_CLOCK = new AtomicLong();
     private static final Map<CacheKey, Future<HeightmapData>> PENDING = new ConcurrentHashMap<>();
-    /** Single thread for pipeline.get() so MemoryTileStore is not accessed concurrently. */
-    private static final ExecutorService INFERENCE_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+
+    /** Bumped whenever the seed changes; prefetch units check it and drop stale work. */
+    private static final AtomicLong GENERATION = new AtomicLong();
+
+    private static final int PRIORITY_REAL = 0;
+    private static final int PRIORITY_PREFETCH = 1;
+    private static final AtomicLong TASK_SEQ = new AtomicLong();
+
+    /** Real work jumps ahead of any speculative unit still waiting in the queue. */
+    private static final class PrioritizedTask implements Runnable, Comparable<PrioritizedTask> {
+        final int priority;
+        final long seq;
+        final Runnable body;
+
+        PrioritizedTask(int priority, Runnable body) {
+            this.priority = priority;
+            this.seq = TASK_SEQ.incrementAndGet();
+            this.body = body;
+        }
+
+        @Override
+        public void run() {
+            body.run();
+        }
+
+        @Override
+        public int compareTo(PrioritizedTask other) {
+            if (priority != other.priority) return Integer.compare(priority, other.priority);
+            return Long.compare(seq, other.seq);
+        }
+    }
+
+    /**
+     * Single thread for pipeline.get() so MemoryTileStore is not accessed concurrently.
+     * Everything must enter through {@link #enqueue}: submit() would wrap tasks in plain
+     * futures the priority queue cannot order.
+     */
+    private static final ExecutorService INFERENCE_EXECUTOR = new ThreadPoolExecutor(
+            1, 1, 0L, TimeUnit.MILLISECONDS, new PriorityBlockingQueue<>(), r -> {
         Thread t = new Thread(r, "terrain-diffusion-inference");
         t.setDaemon(true);
         return t;
     });
+
+    private static void enqueue(int priority, Runnable body) {
+        INFERENCE_EXECUTOR.execute(new PrioritizedTask(priority, body));
+    }
 
     private static volatile LocalTerrainProvider INSTANCE;
     private static long instanceSeed;
@@ -116,8 +161,10 @@ public final class LocalTerrainProvider {
         } else if (instanceSeed != seed) {
             INSTANCE.pipeline.setSeed(seed);
             instanceSeed = seed;
+            GENERATION.incrementAndGet();
             CACHE.clear();
             PENDING.clear();
+            RiverRegions.clear();
         }
     }
 
@@ -137,6 +184,10 @@ public final class LocalTerrainProvider {
     }
 
     public static void clearCache() {
+        // Also retires queued prefetch units: they captured the previous world's scale
+        // and river parameters, and a same-seed world with different settings must not
+        // inherit regions built under the old ones.
+        GENERATION.incrementAndGet();
         CACHE.clear();
         PENDING.clear();
     }
@@ -201,8 +252,12 @@ public final class LocalTerrainProvider {
             LocalTerrainProvider provider = getInstance();
             provider.pipeline.setSeed(newSeed);
             instanceSeed = newSeed;
+            GENERATION.incrementAndGet();
             CACHE.clear();
             PENDING.clear();
+            // Regions hold the old seed's rivers; without this they would be carved
+            // into the new seed's terrain until a world reload cleared them.
+            RiverRegions.clear();
             return null;
         });
     }
@@ -215,7 +270,57 @@ public final class LocalTerrainProvider {
     }
 
     private static <T> T submitToInferenceThread(Callable<T> task) throws Exception {
-        return INFERENCE_EXECUTOR.submit(task).get();
+        FutureTask<T> future = new FutureTask<>(task);
+        enqueue(PRIORITY_REAL, future);
+        return future.get();
+    }
+
+    // =========================================================================
+    // Prefetcher hooks — all run on the inference thread at low priority
+    // =========================================================================
+
+    /** Cache generation for staleness checks; bumped on every seed change. */
+    static long cacheGeneration() {
+        return GENERATION.get();
+    }
+
+    /** Queues one speculative unit behind all real work. */
+    static void enqueuePrefetch(Runnable body) {
+        enqueue(PRIORITY_PREFETCH, body);
+    }
+
+    /** Stage prewarm for the prefetcher; must run on the inference thread. */
+    static void prewarmDirect(WorldPipeline.Stage stage, int i0, int j0, int i1, int j1) {
+        getInstance().pipeline.prewarm(stage, i0, j0, i1, j1);
+    }
+
+    /**
+     * The same fetch the carver's region lambda does: direct, because this already runs
+     * on the inference thread, and latitude-biased so prefetched drainage matches what a
+     * real tile would have built.
+     */
+    static float[][] fetchForRegionDirect(int a, int b, int c, int d) {
+        float[][] o = getInstance().pipeline.get(a, b, c, d, true);
+        o[1] = withLatitudeBias(o[1], a, c - a, d - b, WorldScaleManager.getCurrentScale());
+        return o;
+    }
+
+    /**
+     * Computes one tile in place on the inference thread if nobody has it or is on it.
+     * The pending map arbitrates with real requests both ways: a worker that asks for
+     * this tile mid-compute waits on the same future instead of recomputing it.
+     */
+    static void computeTileInlineIfAbsent(int i1, int j1, int i2, int j2) {
+        LocalTerrainProvider provider = getInstance();
+        CacheKey key = new CacheKey(i1, j1, i2, j2);
+        if (CACHE.containsKey(key)) return;
+        FutureTask<HeightmapData> task = provider.tileTask(key, i1, j1, i2, j2);
+        if (PENDING.putIfAbsent(key, task) == null) {
+            task.run();
+            // On success the task removed its own pending entry; an exception leaves it,
+            // and a stuck entry would make every later request hang on a dead future.
+            PENDING.remove(key, task);
+        }
     }
 
     /**
@@ -239,15 +344,19 @@ public final class LocalTerrainProvider {
         CacheEntry cached = CACHE.get(key);
         if (cached != null) {
             cached.lastAccessed.set(CACHE_CLOCK.incrementAndGet());
+            TerrainPrefetcher.noteAccess(i1, j1);
             return cached.data;
         }
 
-        return this.genHeightmap(key, i1, j1, i2, j2);
+        HeightmapData data = this.genHeightmap(key, i1, j1, i2, j2);
+        TerrainPrefetcher.noteAccess(i1, j1);
+        return data;
     }
 
-    private HeightmapData genHeightmap(CacheKey key, int i1, int j1, int i2, int j2) {
+    /** The full compute for one tile, run wherever the caller decides. */
+    private FutureTask<HeightmapData> tileTask(CacheKey key, int i1, int j1, int i2, int j2) {
         int scale = WorldScaleManager.getCurrentScale();
-        FutureTask<HeightmapData> task = new FutureTask<>(() -> {
+        return new FutureTask<>(() -> {
             long computedWindowCountBefore = pipeline.getTotalComputedWindowCount();
             HeightmapData data = scale <= 1
                     ? handle1x(i1, j1, i2, j2)
@@ -265,6 +374,10 @@ public final class LocalTerrainProvider {
             PENDING.remove(key);
             return data;
         });
+    }
+
+    private HeightmapData genHeightmap(CacheKey key, int i1, int j1, int i2, int j2) {
+        FutureTask<HeightmapData> task = tileTask(key, i1, j1, i2, j2);
         Future<HeightmapData> existing = PENDING.putIfAbsent(key, task);
         FutureTask<HeightmapData> toRun = (existing == null) ? task : (FutureTask<HeightmapData>) existing;
         if (existing == null) {
@@ -273,7 +386,7 @@ public final class LocalTerrainProvider {
             LOG.info(
                     "Terrain Diffusion ({}) uncached region requested: ({}, {})-({}, {}) size {}x{}",
                     OnnxModel.getResolvedInferenceProvider(), j1, i1, j2, i2, regionWidth, regionHeight);
-            INFERENCE_EXECUTOR.submit(toRun);
+            enqueue(PRIORITY_REAL, toRun);
         }
         try {
             return toRun.get();

@@ -133,6 +133,16 @@ public class InfiniteTensor {
     }
 
     /**
+     * Computes and caches every window this slice would read, without assembling the
+     * slice. Lets a prefetcher warm the caches stage by stage: ensuring a downstream
+     * tensor pulls all of its upstream windows first, each stage's model called in one
+     * grouped run rather than interleaved per window.
+     */
+    public void ensure(int[] start, int[] end) {
+        ensureComputed(buildRange(start, end));
+    }
+
+    /**
      * Ensures every window that intersects any of the given pixel ranges is present.
      * Matches Python _apply_f_range: each range is expanded to window indices, then
      * deduped (no bounding-box union, so we only request windows that actually intersect

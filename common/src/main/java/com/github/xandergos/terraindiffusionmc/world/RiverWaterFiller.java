@@ -108,6 +108,7 @@ public final class RiverWaterFiller {
 
         int minY = chunk.getMinBuildHeight();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        boolean anyWater = false;
 
         for (int dz = 0; dz < 16; dz++) {
             int localZ = minBlockZ + dz - tileStartZ;
@@ -119,6 +120,7 @@ public final class RiverWaterFiller {
 
                 short metres = data.waterLevel[localZ][localX];
                 if (metres == HeightmapData.NO_WATER) continue;
+                anyWater = true;
 
                 // convertToMinecraftHeight names the first air block above an elevation, so
                 // the top water block goes one below it, the way sea level 63 puts vanilla's
@@ -141,7 +143,11 @@ public final class RiverWaterFiller {
             }
         }
 
-        smoothSteps(chunk, data, minBlockX, minBlockZ, tileStartX, tileStartZ, pos);
+        // The step pass reads the whole tile but only ever writes on water columns, so a
+        // dry chunk can skip its tile-wide surface scan and lens flood entirely.
+        if (anyWater) {
+            smoothSteps(chunk, data, minBlockX, minBlockZ, tileStartX, tileStartZ, pos);
+        }
     }
 
     /**

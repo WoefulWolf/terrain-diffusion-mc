@@ -131,9 +131,15 @@ Edit `config/terrain-diffusion-mc.properties` (created automatically on first la
 inference.device=gpu
 
 # Offload inactive models from VRAM between pipeline stages.
-# Keeps peak VRAM to ~1.5-2 GB. Set to false if you have ~2.5+ GB free for slightly
-# faster generation.
+# Keeps peak VRAM to ~1.5-2 GB. Set to false if you have ~2.5+ GB free: each model
+# swap costs seconds of session rebuilding, so keeping everything resident speeds
+# generation up noticeably. Falls back to offloading if VRAM runs out.
 inference.offload_models=true
+
+# Speculatively generate the terrain around the player while inference is idle, so
+# walking into new land finds it already computed. Uses the GPU in the background;
+# set to false if that competes with your frame rate.
+inference.prefetch=true
 
 # Validate SHA-256 for pre-existing files in .minecraft/terrain-diffusion-models.
 # Set to false if you want to provide custom models/config files without hash checks.

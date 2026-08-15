@@ -26,6 +26,19 @@ public final class TerrainDiffusionConfig {
         }
     }
 
+    // Read once: the density function asks for this on every column of every chunk, and
+    // Properties is a synchronized Hashtable every worker would contend on.
+    private static final int TILE_SIZE = readValidatedTileSize();
+    private static final boolean PREFETCH_ENABLED = readPrefetchEnabled();
+
+    private static boolean readPrefetchEnabled() {
+        // The system property lets headless harnesses opt out without touching the
+        // shared instance config their timings would otherwise fight with.
+        String override = System.getProperty("terrain-diffusion.prefetch");
+        if (override != null) return Boolean.parseBoolean(override);
+        return readBoolean("inference.prefetch", true);
+    }
+
     private TerrainDiffusionConfig() {
     }
 
@@ -43,6 +56,11 @@ public final class TerrainDiffusionConfig {
     /** Whether to offload inactive models from VRAM between pipeline stages. */
     public static boolean offloadModels() {
         return readBoolean("inference.offload_models", DEFAULT_OFFLOAD_MODELS);
+    }
+
+    /** Whether to speculatively generate neighbouring terrain while inference is idle. */
+    public static boolean prefetchEnabled() {
+        return PREFETCH_ENABLED;
     }
 
     /** TCP port for the local terrain explorer HTTP server. */
@@ -67,6 +85,10 @@ public final class TerrainDiffusionConfig {
 
     /** Region side length in blocks. Must be a positive power of 2 (128, 256, 512, ...). */
     public static int tileSize() {
+        return TILE_SIZE;
+    }
+
+    private static int readValidatedTileSize() {
         int configuredTileSize = readInt("tile_size", DEFAULT_TILE_SIZE);
         if (configuredTileSize <= 0 || !isPowerOfTwo(configuredTileSize)) {
             System.err.println("Invalid tile_size: " + configuredTileSize + ", using default " + DEFAULT_TILE_SIZE);

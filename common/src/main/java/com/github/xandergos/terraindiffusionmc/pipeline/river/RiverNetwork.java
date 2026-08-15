@@ -107,11 +107,13 @@ public final class RiverNetwork {
      * further up its own drainage tree at a relaxed floor — so the stump dissolves into
      * thin rivulets converging along their true valleys. {@code headwaterRef} is the
      * unpriced spring floor the tendril thresholds are judged against, and {@code i0},
-     * {@code j0} anchor the budget jitter to world coordinates.
+     * {@code j0} anchor the budget jitter to world coordinates. Lakes of at least
+     * {@code lakeOutletMinCells} cells keep their outlet route regardless of discharge.
      */
     public static List<Reach> extractMainRivers(CoarseHydrology.Drainage d, float minDischarge,
                                                 float edgeFedMin, float[] headwaterMin,
-                                                float headwaterRef, int i0, int j0) {
+                                                float headwaterRef, int lakeOutletMinCells,
+                                                int i0, int j0) {
         int n = d.discharge.length;
         int h = d.height, w = d.width;
         boolean[] keep = new boolean[n];
@@ -156,7 +158,73 @@ public final class RiverNetwork {
                         budget, true, i0, j0);
             }
         }
+
+        keepLakeOutlets(d, keep, lakeOutletMinCells);
         return fromKept(d, keep, n);
+    }
+
+    /**
+     * A big lake always drains somewhere. Its outlet route exists in the drainage — the
+     * fill gives every basin a spill — but its measured discharge can be a fraction of
+     * the truth: a river feeding it from beyond the window border is credited to the
+     * window that saw it, not this one, so the outlet falls under every keep bar and
+     * a huge lake sits sealed while a monster river pours in. Water in must mean water
+     * out, so size the outlet by what was measured but keep it unconditionally.
+     */
+    private static void keepLakeOutlets(CoarseHydrology.Drainage d, boolean[] keep,
+                                        int minCells) {
+        if (minCells <= 0) return;
+        int n = d.discharge.length;
+        int w = d.width;
+
+        // Label lake components by flooding, counting cells as they are claimed.
+        int[] component = new int[n];
+        int[] queue = null;
+        int next = 0;
+        for (int start = 0; start < n; start++) {
+            if (!d.lake[start] || component[start] != 0) continue;
+            if (queue == null) queue = new int[n];
+            next++;
+            int head = 0, tail = 0;
+            queue[tail++] = start;
+            component[start] = next;
+            int cells = 0;
+            while (head < tail) {
+                int cur = queue[head++];
+                cells++;
+                int cr = cur / w, cc = cur - cr * w;
+                for (int dir = 0; dir < 8; dir++) {
+                    int nr = cr + DR[dir], nc = cc + DC[dir];
+                    if (nr < 0 || nr >= d.height || nc < 0 || nc >= w) continue;
+                    int ni = nr * w + nc;
+                    if (d.lake[ni] && component[ni] == 0) {
+                        component[ni] = next;
+                        queue[tail++] = ni;
+                    }
+                }
+            }
+            if (cells < minCells) continue;
+
+            // The exit is where the strongest route leaves the lake for dry ground.
+            int exit = -1;
+            float exitFlow = 0f;
+            for (int k = 0; k < tail; k++) {
+                int cur = queue[k];
+                int to = d.downstream[cur];
+                if (to >= 0 && !d.lake[to] && d.discharge[cur] > exitFlow) {
+                    exitFlow = d.discharge[cur];
+                    exit = cur;
+                }
+            }
+            if (exit < 0) continue;
+
+            // Follow the real course out until it joins something already kept, the sea,
+            // or the window edge. The walk stage turns this into an ordinary river.
+            for (int cur = d.downstream[exit]; cur >= 0 && !keep[cur] && !d.ocean[cur];
+                    cur = d.downstream[cur]) {
+                keep[cur] = true;
+            }
+        }
     }
 
     // A source only counts as a stump above this multiple of the unpriced floor, so tiny

@@ -849,8 +849,11 @@ public final class LocalTerrainProvider {
                 }
 
                 // A lake sits a freeboard below its shore, and a one-block wall of water
-                // cannot be climbed out of. Dithered spots of the shore ring are lowered
-                // flush with the surface, so some of the bank is always a way out.
+                // cannot be climbed out of. Stretches of the shore ring are lowered flush
+                // with the surface, so some of the bank is always a way out. Chosen by a
+                // slow noise rather than per-block chance: coin-flipped blocks read as
+                // airbrush speckle, while a coherent field makes whole reaches of bank
+                // shallow with steep shore between them.
                 for (int dz = -scale; dz < 2 * scale; dz++) {
                     int row = region.lakeBlockZ[k] + dz - i1;
                     if (row < 0 || row >= height) continue;
@@ -860,8 +863,9 @@ public final class LocalTerrainProvider {
                         int idx = row * width + col;
                         if (waterFlat == null || waterFlat[idx] != Float.NEGATIVE_INFINITY) continue;
                         if (elev[idx] <= level || elev[idx] > level + 1.4f * metresPerBlock) continue;
-                        int hash = positionHash(region.lakeBlockX[k] + dx, region.lakeBlockZ[k] + dz);
-                        if (hash < 96) elev[idx] = level + 0.05f * metresPerBlock;
+                        float n = SHORE_EXIT_NOISE.GetNoise(
+                                region.lakeBlockX[k] + dx, region.lakeBlockZ[k] + dz);
+                        if (n > SHORE_EXIT_NOISE_MIN) elev[idx] = level + 0.05f * metresPerBlock;
                     }
                 }
             }
@@ -1036,14 +1040,9 @@ public final class LocalTerrainProvider {
         }
     }
 
-    /** Deterministic 0..255 from world position, for dithers that agree across tiles. */
-    private static int positionHash(int x, int z) {
-        int h = x * 0x9E3779B1 + z * 0x85EBCA77;
-        h ^= h >>> 15;
-        h *= 0x2C1B3C6D;
-        h ^= h >>> 12;
-        return h & 0xFF;
-    }
+    /** Picks which reaches of a lake shore are climbable; world-sampled so tiles agree. */
+    private static final FastNoiseLite SHORE_EXIT_NOISE = makeFnl(0xE5CA, 1f / 28f, 2, 2f, 0.5f);
+    private static final float SHORE_EXIT_NOISE_MIN = 0.12f;
 
     /**
      * Coherent relief for every wetted floor. The carver stamps flat discs along the path,

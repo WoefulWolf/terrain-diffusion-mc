@@ -45,13 +45,29 @@ public final class LatitudeParameters {
     }
 
     /**
+     * How much of the wave keeps the cosine's curve. A pure cosine turns over slowly at
+     * the equator and the poles and races through the middle, which crowds the world
+     * into hot and frozen and leaves barely any temperate ground between them — the
+     * belt where most forests live. A straight ramp spreads latitude evenly and is the
+     * better likeness anyway: Earth's mean temperature falls close to linearly from the
+     * tropics to the high latitudes. Keeping a little cosine rounds the turn at each
+     * extreme, so the equator and the ice caps are zones rather than knife edges.
+     */
+    private static final double COSINE_ROUNDING = 0.25;
+
+    /**
      * Temperature shift at a block-space north-south coordinate. North is negative z,
      * so the equator lies south of a spawn placed at northern latitude.
      */
     public float temperatureBiasAt(double zBlock) {
         if (bandStrengthC == 0) return 0f;
         double equatorZ = equatorPoleBlocks * (startLatitudeDeg / 90.0);
+        double phase = Math.PI * (zBlock - equatorZ) / equatorPoleBlocks;
+        double cosine = Math.cos(phase);
+        // asin of a cosine is exactly a triangle wave, so this stays periodic and
+        // continuous across the poles while running straight in between.
+        double ramp = 2.0 / Math.PI * Math.asin(cosine);
         return (float) (bandStrengthC
-                * Math.cos(Math.PI * (zBlock - equatorZ) / equatorPoleBlocks));
+                * (ramp + COSINE_ROUNDING * (cosine - ramp)));
     }
 }

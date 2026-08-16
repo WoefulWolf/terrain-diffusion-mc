@@ -67,6 +67,34 @@ public final class BiomeClassifier {
     // cannot run from a tile's own window.
     public static final short MUSHROOM_FIELDS = 50;
 
+    /**
+     * Altitude gates are judged against the high ground around them, not against a fixed
+     * number of metres. A landmass topping out below the absolute figure would otherwise
+     * grow no alpine country at all — no meadow, no snowy slopes, no peaks — however
+     * mountainous it reads from the valley floor. Each gate takes the lower of its
+     * absolute threshold and a share of the local high ground, then refuses to fall
+     * below a floor, so a real range still has to earn its metres while a modest one
+     * still gets a summit, and a genuinely flat island stays flat.
+     *
+     * <p>The local reference is a high percentile of nearby land, so a place can stand
+     * above it. That is what marks a summit, and bare peaks answer to it rather than to
+     * a slope threshold snowy ranges rarely reach.
+     */
+    private static final float MOUNTAIN_ABSOLUTE_M = 2500f;
+    private static final float MOUNTAIN_LOCAL_FRACTION = 0.72f;
+    private static final float MOUNTAIN_FLOOR_M = 700f;
+    private static final float UPLAND_ABSOLUTE_M = 900f;
+    private static final float UPLAND_LOCAL_FRACTION = 0.45f;
+    private static final float UPLAND_FLOOR_M = 250f;
+    /**
+     * Jagged peaks are the shattered tops above the merely frozen ones, so this has to
+     * stand well clear of the summit line or there is no band left between them for
+     * frozen peaks to occupy at all.
+     */
+    private static final float JAGGED_LOCAL_FRACTION = 1.30f;
+    /** Above this share of the local high ground the ground is bare summit. */
+    private static final float SUMMIT_LOCAL_FRACTION = 1.05f;
+
     // Thresholds separating each variant from its parent biome. All empirical.
     private static final float DEEP_OCEAN_DEPTH_M = -1800f;
     private static final float JAGGED_PEAKS_MIN_ALT_M = 3200f;
@@ -80,6 +108,9 @@ public final class BiomeClassifier {
     private static final float ICE_SPIKES_MAX_PRECIP_MM = 220f;
     private static final float ICE_SPIKES_MAX_SLOPE = 0.15f;
     private static final float DESERT_MAX_TREE_MOISTURE = 0.12f;
+    /** Rain and moisture that separate grass country from bare spruce grove. */
+    private static final float MEADOW_MIN_MOISTURE = 0.35f;
+    private static final float MEADOW_MIN_PRECIP_MM = 350f;
 
     // One mask per accent, on distinct seeds so their patches never coincide. The
     // threshold sits at the measured 96th percentile of this spectrum, so each accent
@@ -88,20 +119,41 @@ public final class BiomeClassifier {
     private static final FastNoiseLite CHERRY_MASK = makeFnl(0xC4E88, 1f / 400f, 2, 2f, 0.5f);
     private static final FastNoiseLite FLOWER_MASK = makeFnl(0xF10E5, 1f / 400f, 2, 2f, 0.5f);
     private static final FastNoiseLite SUNFLOWER_MASK = makeFnl(0x50FA2, 1f / 400f, 2, 2f, 0.5f);
-    private static final float ACCENT_MASK_MIN = 0.40f;
+    /**
+     * Each accent takes a different share of its parent, because the parents are not
+     * equally common. A single share written for a common parent makes an accent on a
+     * rare one vanish: meadow covers under two percent of land, so a few percent of
+     * that is a patch nobody will ever stand in. These are set instead so each accent
+     * lands somewhere near half a percent of the world — rare enough to be a find,
+     * common enough to exist.
+     */
+    private static final float CHERRY_MASK_MIN = 0.14f;
+    private static final float FLOWER_MASK_MIN = 0.22f;
+    private static final float SUNFLOWER_MASK_MIN = 0.30f;
+    /**
+     * Continentality earns sunflowers ground rather than deciding whether they may
+     * exist. The seasonal country and the grassland lie in different places, so as a
+     * veto any threshold strict enough to mean something leaves whole regions of plains
+     * with none at all. As a bonus it still does its work — interiors are thick with
+     * them, coasts keep the occasional patch — without the biome hinging on two
+     * unrelated fields happening to coincide.
+     */
+    private static final float SUNFLOWER_CONTINENTAL_BONUS = 0.35f;
     // Cherry country is the warm, watered fringe of meadow terrain. Meadow only forms
     // where the growing season fails the trees, so its cells centre a few degrees
     // below zero; the floor sits low enough to keep the milder half.
     private static final float CHERRY_MIN_TEMP_C = -3f;
     private static final float CHERRY_MIN_PRECIP_MM = 450f;
     /**
-     * Sunflowers follow continental interiors, which is what a high seasonality
-     * channel reads as: the measured land distribution is two-humped — maritime cells
-     * cluster near 380, interior cells above 900 — so this sits on the continental
-     * hump and coastal plains never qualify. No upper temperature bound: the warm
-     * steppe branch is exactly the continental grassland sunflowers belong to.
+     * Sunflowers follow continental interiors, which is what a high seasonality channel
+     * reads as. Measured against grassland specifically rather than against all land:
+     * plains-bearing country runs about 600 to 1000, and every region sits at its own
+     * level within that — one measures 691 at the median, another 956. A bar pitched at
+     * the most continental region therefore picks out no interior in any of the others,
+     * it simply excludes them. This sits above the median of every grassland region
+     * measured, so each contributes its own more continental half.
      */
-    private static final float SUNFLOWER_MIN_SEASON = 950f;
+    private static final float SUNFLOWER_MIN_SEASON = 750f;
     private static final float SUNFLOWER_MIN_TEMP_C = 0f;
     private static final float SUNFLOWER_MIN_PRECIP_MM = 300f;
 
@@ -123,6 +175,17 @@ public final class BiomeClassifier {
     public static short[] classify(float[] elev, float[] climate, int i0, int j0,
                                     float[] elevPadded, int H, int W, float pixelSizeM,
                                     float[] coastDist) {
+        return classify(elev, climate, i0, j0, elevPadded, H, W, pixelSizeM, coastDist, null);
+    }
+
+    /**
+     * @param localRelief high ground nearby in metres per cell, from
+     *                    {@link LocalReliefField}; null falls back to absolute altitude
+     *                    thresholds, which is what synthetic grids and tests want
+     */
+    public static short[] classify(float[] elev, float[] climate, int i0, int j0,
+                                    float[] elevPadded, int H, int W, float pixelSizeM,
+                                    float[] coastDist, float[] localRelief) {
         short[] out = new short[H * W];
         for (int i = 0; i < H * W; i++) out[i] = PLAINS;
 
@@ -169,28 +232,11 @@ public final class BiomeClassifier {
                 float precip   = Math.max(0f, climate[2 * H * W + idx]) * precipNoiseFact[idx];
                 float pCV      = climate[3 * H * W + idx];
 
-                // Derived climate variables
-                float tStd     = tSeason / 100f;
-                float tEff     = Math.max(0f, temp + 0.5f * tStd);
-                float pet      = Math.max(250f, 250f + 25f * tEff + 0.7f * tEff * tEff);
-                float aridity  = precip / Math.max(1f, pet);
-                float seasonPenalty = 1f - 0.35f * Math.min(1f, pCV / 100f);
-                float treeMoisture = aridity * seasonPenalty;
-
-                // Growing season
-                float amplitude = tStd * 1.414f;
-                float growingSeason;
-                if (amplitude < 0.1f) {
-                    growingSeason = temp > 5f ? 365f : 0f;
-                } else {
-                    float x = (5f - temp) / amplitude;
-                    if (x <= -1f) growingSeason = 365f;
-                    else if (x >= 1f) growingSeason = 0f;
-                    else growingSeason = 365f * (0.5f - (float) Math.asin(Math.max(-1f, Math.min(1f, x))) / (float) Math.PI);
-                }
-
-                float gsFactor = Math.max(0f, Math.min(1f, (growingSeason - 60f) / (150f - 60f)));
-                float effTreeMoisture = treeMoisture * gsFactor;
+                DerivedClimate derived = DerivedClimate.of(temp, tSeason, precip, pCV);
+                float tStd = derived.tStd();
+                float treeMoisture = derived.treeMoisture();
+                float growingSeason = derived.growingSeason();
+                float effTreeMoisture = derived.effTreeMoisture();
 
                 // Slope-dependent bare threshold
                 float moistureFactor = Math.max(0f, Math.min(1f, (treeMoisture - 0.35f) / 0.45f));
@@ -223,9 +269,21 @@ public final class BiomeClassifier {
                 boolean isSteep = slope > 0.78f;
                 boolean hasSnow = snowTemp < 0f && precip > 150f && !isSteep;
 
-                // Elevation/temp bands
+                // Elevation/temp bands, sized against the country around this cell.
+                float localHigh = localRelief == null ? 0f : localRelief[idx];
+                float mountainCut = localGate(localHigh, MOUNTAIN_LOCAL_FRACTION,
+                        MOUNTAIN_FLOOR_M, MOUNTAIN_ABSOLUTE_M);
+                float uplandCut = localGate(localHigh, UPLAND_LOCAL_FRACTION,
+                        UPLAND_FLOOR_M, UPLAND_ABSOLUTE_M);
+                // Jagged stands a fixed step above the summit line rather than at an
+                // absolute height. Capped at a metre figure the two coincide in tall
+                // country, leaving frozen peaks no band between them to occupy.
+                float jaggedCut = localHigh > 1f
+                        ? localHigh * JAGGED_LOCAL_FRACTION : JAGGED_PEAKS_MIN_ALT_M;
+                boolean summit = localHigh > 1f && altM >= localHigh * SUMMIT_LOCAL_FRACTION;
+
                 boolean isOcean   = elevVal < 0f;
-                boolean mountains = altM > 2500f;
+                boolean mountains = altM > mountainCut;
                 boolean lowland   = altM < 200f;
                 boolean frozen    = temp < -5f;
                 boolean cold      = temp >= -5f && temp < 5f;
@@ -244,8 +302,12 @@ public final class BiomeClassifier {
                     else if (warm) biome = deep ? DEEP_LUKEWARM_OCEAN : LUKEWARM_OCEAN;
                     else biome = deep ? DEEP_OCEAN : OCEAN;
                 } else if (mountains) {
-                    if (slopeBare) {
-                        if (hasSnow) biome = altM > JAGGED_PEAKS_MIN_ALT_M ? JAGGED_PEAKS : FROZEN_PEAKS;
+                    // Above the snow line a summit is bare because it stands over
+                    // everything around it, so snowy ranges grow peaks without waiting
+                    // on a slope bar they rarely clear. Warmer mountains keep their
+                    // cover to the top unless the rock is genuinely cliff-steep.
+                    if (slopeBare || (summit && hasSnow)) {
+                        if (hasSnow) biome = altM > jaggedCut ? JAGGED_PEAKS : FROZEN_PEAKS;
                         else biome = STONY_PEAKS;
                     } else if (hasSnow) {
                         if (treesNone) biome = SNOWY_SLOPES;
@@ -253,10 +315,16 @@ public final class BiomeClassifier {
                         else biome = SNOWY_TAIGA;
                     } else if (treesNone) {
                         if (barren) biome = slopeMedium ? WINDSWEPT_GRAVELLY_HILLS : WINDSWEPT_HILLS;
-                        else if (treeMoisture < 0.35f || precip < 350f) biome = GROVE;
+                        else if (treeMoisture < MEADOW_MIN_MOISTURE || precip < MEADOW_MIN_PRECIP_MM) biome = GROVE;
                         else biome = MEADOW;
                     } else if (treesSparse || treesForest) {
-                        biome = slopeMedium ? WINDSWEPT_FOREST : TAIGA_SPARSE;
+                        // Alpine meadow carries scattered trees rather than none at all.
+                        // Demanding bare ground strands it between the country warm
+                        // enough to forest and the country cold enough to go snowy.
+                        if (slopeMedium) biome = WINDSWEPT_FOREST;
+                        else if (treesSparse && treeMoisture >= MEADOW_MIN_MOISTURE
+                                && precip >= MEADOW_MIN_PRECIP_MM) biome = MEADOW;
+                        else biome = TAIGA_SPARSE;
                     } else {
                         biome = TAIGA;
                     }
@@ -269,7 +337,7 @@ public final class BiomeClassifier {
                     } else if (hasSnow) {
                         biome = (treesSparse || treesForest) ? SNOWY_TAIGA_SPARSE : SNOWY_TAIGA;
                     } else if (treesNone) {
-                        if (hot && altM > BADLANDS_MIN_ALT_M) {
+                        if (hot && altM > uplandCut) {
                             biome = slopeMedium ? ERODED_BADLANDS : BADLANDS;
                         }
                         else if (warm || hot) {
@@ -280,12 +348,16 @@ public final class BiomeClassifier {
                             if (treeMoisture < DESERT_MAX_TREE_MOISTURE) biome = DESERT;
                             else biome = hot ? SAVANNA : PLAINS;
                         }
-                        else if (barren && !lowland && (cold || cool || temperate)) biome = GROVE;
-                        else if (treeMoisture < 0.35f || precip < 350f) biome = GROVE;
+                        // Temperate treeless country is steppe: grassland too dry or too
+                        // short-seasoned for woods. Grove is snowy spruce country and
+                        // belongs to the cold branches below, not to this one.
+                        else if (temperate) biome = PLAINS;
+                        else if (barren && !lowland && (cold || cool)) biome = GROVE;
+                        else if (treeMoisture < MEADOW_MIN_MOISTURE || precip < MEADOW_MIN_PRECIP_MM) biome = GROVE;
                         else biome = PLAINS;
                     } else if (treesSparse || treesForest) {
                         if (hot) {
-                            if (altM > BADLANDS_MIN_ALT_M && treeMoisture < WOODED_BADLANDS_MAX_MOISTURE) {
+                            if (altM > uplandCut && treeMoisture < WOODED_BADLANDS_MAX_MOISTURE) {
                                 biome = WOODED_BADLANDS;
                             } else {
                                 biome = treesSparse ? SPARSE_JUNGLE : JUNGLE;
@@ -293,7 +365,7 @@ public final class BiomeClassifier {
                         }
                         else if (warm && treesSparse && slopeMedium) biome = WINDSWEPT_SAVANNA;
                         else if (warm && treesSparse) {
-                            biome = altM > SAVANNA_PLATEAU_MIN_ALT_M ? SAVANNA_PLATEAU : SAVANNA;
+                            biome = altM > uplandCut ? SAVANNA_PLATEAU : SAVANNA;
                         }
                         else if (warm && treesForest) biome = FOREST_SPARSE;
                         else if (temperate) biome = FOREST_SPARSE;
@@ -329,18 +401,20 @@ public final class BiomeClassifier {
                 // Accents, last, so they only ever dress a surviving parent.
                 if (biome == MEADOW) {
                     if (temp >= CHERRY_MIN_TEMP_C && precip >= CHERRY_MIN_PRECIP_MM
-                            && CHERRY_MASK.GetNoise(j0 + c, i0 + r) > ACCENT_MASK_MIN) {
+                            && CHERRY_MASK.GetNoise(j0 + c, i0 + r) > CHERRY_MASK_MIN) {
                         biome = CHERRY_GROVE;
                     }
                 } else if (biome == FOREST || biome == BIRCH_FOREST) {
                     // The parents already guarantee mild and wet; the mask alone decides.
-                    if (FLOWER_MASK.GetNoise(j0 + c, i0 + r) > ACCENT_MASK_MIN) {
+                    if (FLOWER_MASK.GetNoise(j0 + c, i0 + r) > FLOWER_MASK_MIN) {
                         biome = FLOWER_FOREST;
                     }
                 } else if (biome == PLAINS) {
-                    if (tSeason >= SUNFLOWER_MIN_SEASON && temp >= SUNFLOWER_MIN_TEMP_C
-                            && precip >= SUNFLOWER_MIN_PRECIP_MM
-                            && SUNFLOWER_MASK.GetNoise(j0 + c, i0 + r) > ACCENT_MASK_MIN) {
+                    float continentalBonus = tSeason >= SUNFLOWER_MIN_SEASON
+                            ? SUNFLOWER_CONTINENTAL_BONUS : 0f;
+                    if (temp >= SUNFLOWER_MIN_TEMP_C && precip >= SUNFLOWER_MIN_PRECIP_MM
+                            && SUNFLOWER_MASK.GetNoise(j0 + c, i0 + r)
+                                    > SUNFLOWER_MASK_MIN - continentalBonus) {
                         biome = SUNFLOWER_PLAINS;
                     }
                 }
@@ -424,6 +498,15 @@ public final class BiomeClassifier {
         for (int r = 0; r < H; r++)
             System.arraycopy(dist, (r + pad) * wideW + pad, core, r * W, W);
         return core;
+    }
+
+    /**
+     * The lower of an absolute altitude and a share of the local high ground, never
+     * below the floor. With no local reference the absolute figure stands alone.
+     */
+    private static float localGate(float localHigh, float fraction, float floor, float absolute) {
+        if (localHigh <= 1f) return absolute;
+        return Math.max(floor, Math.min(absolute, localHigh * fraction));
     }
 
     private static boolean isMangroveCoast(float[] coastDist, int idx, float altM,
@@ -513,7 +596,7 @@ public final class BiomeClassifier {
      * In-place two-pass chamfer distance transform. Seeds are cells already at 0;
      * output is distance in pixels (diagonal steps cost sqrt 2).
      */
-    private static void chamferDistance(float[] d, int H, int W) {
+    static void chamferDistance(float[] d, int H, int W) {
         final float ORTH = 1f, DIAG = 1.41421356f;
         for (int r = 0; r < H; r++) {
             for (int c = 0; c < W; c++) {
@@ -543,7 +626,8 @@ public final class BiomeClassifier {
         }
     }
 
-    private static float[] computeSlopeRatio(float[] elevPadded, int H, int W, float pixelSizeM) {
+    /** Blocks risen per block travelled, from a 1-pixel-padded elevation field. */
+    public static float[] computeSlopeRatio(float[] elevPadded, int H, int W, float pixelSizeM) {
         // Sobel kernels / 8 applied to (H+2, W+2) padded array → (H, W) output
         float[] slope = new float[H * W];
         int PW = W + 2;

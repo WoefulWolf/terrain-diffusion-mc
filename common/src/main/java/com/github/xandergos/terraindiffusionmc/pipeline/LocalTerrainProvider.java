@@ -166,6 +166,8 @@ public final class LocalTerrainProvider {
             PENDING.clear();
             RiverRegions.clear();
             MushroomIslands.clear();
+            ContinentalField.clear();
+            LocalReliefField.clear();
         }
     }
 
@@ -261,8 +263,25 @@ public final class LocalTerrainProvider {
             // verdicts are seed-pure the same way.
             RiverRegions.clear();
             MushroomIslands.clear();
+            ContinentalField.clear();
+            LocalReliefField.clear();
             return null;
         });
+    }
+
+    /**
+     * Distance to the sea in blocks across a block window, at continental scale.
+     * Runs on the inference thread, which the coarse slices behind it require.
+     */
+    public static float[] continentalDistance(int i0, int j0, int height, int width) throws Exception {
+        return submitToInferenceThread(() -> ContinentalField.forBlockWindow(
+                i0, j0, height, width, WorldScaleManager.getCurrentScale(), getInstance().pipeline));
+    }
+
+    /** Local high-ground elevation in metres across a block window, for diagnostics. */
+    public static float[] localRelief(int i0, int j0, int height, int width) throws Exception {
+        return submitToInferenceThread(() -> LocalReliefField.forBlockWindow(
+                i0, j0, height, width, WorldScaleManager.getCurrentScale(), getInstance().pipeline));
     }
 
     /** Island verdict for one coarse cell, for the explorer and diagnostics. */
@@ -433,7 +452,8 @@ public final class LocalTerrainProvider {
         float[] climate  = withLatitudeBias(out[1], i1, H, W, 1);
 
         float[] coastDist = BiomeClassifier.coastDistance(elevWide, shorePad, H, W);
-        short[] biomeFlat = BiomeClassifier.classify(elevFlat, climate, i1, j1, elevPadded, H, W, NATIVE_RESOLUTION, coastDist);
+        float[] localRelief = LocalReliefField.forBlockWindow(i1, j1, H, W, 1, pipeline);
+        short[] biomeFlat = BiomeClassifier.classify(elevFlat, climate, i1, j1, elevPadded, H, W, NATIVE_RESOLUTION, coastDist, localRelief);
         BiomeClassifier.applyShoreline(biomeFlat, elevFlat, elevWide, shorePad, coastDist, i1, j1, H, W, NATIVE_RESOLUTION);
         stampMushroomIslands(elevFlat, biomeFlat, i1, j1, H, W, 1);
         float[] waterFlat = newWaterField(H * W);
@@ -490,7 +510,8 @@ public final class LocalTerrainProvider {
         float[] elevOut = addElevationNoise(elevSmooth, elevPadded, i1, j1, H, W, pixelSizeM);
 
         float[] coastDist = BiomeClassifier.coastDistance(elevWide, shorePad, H, W);
-        short[] biomeFlat = BiomeClassifier.classify(elevSmooth, climate, i1, j1, elevPadded, H, W, pixelSizeM, coastDist);
+        float[] localRelief = LocalReliefField.forBlockWindow(i1, j1, H, W, scale, pipeline);
+        short[] biomeFlat = BiomeClassifier.classify(elevSmooth, climate, i1, j1, elevPadded, H, W, pixelSizeM, coastDist, localRelief);
         BiomeClassifier.applyShoreline(biomeFlat, elevSmooth, elevWide, shorePad, coastDist, i1, j1, H, W, pixelSizeM);
         stampMushroomIslands(elevSmooth, biomeFlat, i1, j1, H, W, scale);
         float[] waterFlat = newWaterField(H * W);

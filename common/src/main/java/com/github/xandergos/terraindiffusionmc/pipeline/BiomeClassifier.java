@@ -58,6 +58,15 @@ public final class BiomeClassifier {
     // inside the per-pixel loop.
     public static final short BEACH = 38, SNOWY_BEACH = 39, STONY_SHORE = 40;
 
+    // Accent biomes carved out of a parent by a slow mask. They have no climate
+    // signature of their own: a cherry hillside is a meadow that happens to be cherry
+    // country, so the mask decides where, and the parent's own gates decide whether.
+    static final short SUNFLOWER_PLAINS = 2, FLOWER_FOREST = 9, CHERRY_GROVE = 30;
+
+    // Stamped by the provider's island pass, which needs the coarse ocean mask and so
+    // cannot run from a tile's own window.
+    public static final short MUSHROOM_FIELDS = 50;
+
     // Thresholds separating each variant from its parent biome. All empirical.
     private static final float DEEP_OCEAN_DEPTH_M = -1800f;
     private static final float JAGGED_PEAKS_MIN_ALT_M = 3200f;
@@ -71,6 +80,30 @@ public final class BiomeClassifier {
     private static final float ICE_SPIKES_MAX_PRECIP_MM = 220f;
     private static final float ICE_SPIKES_MAX_SLOPE = 0.15f;
     private static final float DESERT_MAX_TREE_MOISTURE = 0.12f;
+
+    // One mask per accent, on distinct seeds so their patches never coincide. The
+    // threshold sits at the measured 96th percentile of this spectrum, so each accent
+    // claims about four percent of the parent land its gates allow, in patches a
+    // couple of hundred blocks across.
+    private static final FastNoiseLite CHERRY_MASK = makeFnl(0xC4E88, 1f / 400f, 2, 2f, 0.5f);
+    private static final FastNoiseLite FLOWER_MASK = makeFnl(0xF10E5, 1f / 400f, 2, 2f, 0.5f);
+    private static final FastNoiseLite SUNFLOWER_MASK = makeFnl(0x50FA2, 1f / 400f, 2, 2f, 0.5f);
+    private static final float ACCENT_MASK_MIN = 0.40f;
+    // Cherry country is the warm, watered fringe of meadow terrain. Meadow only forms
+    // where the growing season fails the trees, so its cells centre a few degrees
+    // below zero; the floor sits low enough to keep the milder half.
+    private static final float CHERRY_MIN_TEMP_C = -3f;
+    private static final float CHERRY_MIN_PRECIP_MM = 450f;
+    /**
+     * Sunflowers follow continental interiors, which is what a high seasonality
+     * channel reads as: the measured land distribution is two-humped — maritime cells
+     * cluster near 380, interior cells above 900 — so this sits on the continental
+     * hump and coastal plains never qualify. No upper temperature bound: the warm
+     * steppe branch is exactly the continental grassland sunflowers belong to.
+     */
+    private static final float SUNFLOWER_MIN_SEASON = 950f;
+    private static final float SUNFLOWER_MIN_TEMP_C = 0f;
+    private static final float SUNFLOWER_MIN_PRECIP_MM = 300f;
 
     /**
      * Classify biomes for a grid of pixels.
@@ -291,6 +324,25 @@ public final class BiomeClassifier {
                 // Bare slope override for lowland/non-mountain cliffs
                 if (slopeBare && !isOcean && !mountains) {
                     biome = hasSnow ? FROZEN_PEAKS : STONY_PEAKS;
+                }
+
+                // Accents, last, so they only ever dress a surviving parent.
+                if (biome == MEADOW) {
+                    if (temp >= CHERRY_MIN_TEMP_C && precip >= CHERRY_MIN_PRECIP_MM
+                            && CHERRY_MASK.GetNoise(j0 + c, i0 + r) > ACCENT_MASK_MIN) {
+                        biome = CHERRY_GROVE;
+                    }
+                } else if (biome == FOREST || biome == BIRCH_FOREST) {
+                    // The parents already guarantee mild and wet; the mask alone decides.
+                    if (FLOWER_MASK.GetNoise(j0 + c, i0 + r) > ACCENT_MASK_MIN) {
+                        biome = FLOWER_FOREST;
+                    }
+                } else if (biome == PLAINS) {
+                    if (tSeason >= SUNFLOWER_MIN_SEASON && temp >= SUNFLOWER_MIN_TEMP_C
+                            && precip >= SUNFLOWER_MIN_PRECIP_MM
+                            && SUNFLOWER_MASK.GetNoise(j0 + c, i0 + r) > ACCENT_MASK_MIN) {
+                        biome = SUNFLOWER_PLAINS;
+                    }
                 }
 
                 out[idx] = biome;

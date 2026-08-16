@@ -10,18 +10,20 @@ Forked from [xandergos/terrain-diffusion-mc](https://github.com/xandergos/terrai
 
 |                                       | before   | now      |
 |---------------------------------------|----------|----------|
-| Vanilla overworld biomes generated    | 20 of 53 | 49 of 53 |
-| Overworld structures able to generate | 24       | 29       |
+| Vanilla overworld biomes generated    | 20 of 53 | 53 of 53 |
+| Overworld structures able to generate | 24       | 29 of 29 |
 
-The 24 new biomes are derived from climate signals the classifier already computed, so no model changes were needed:
+Every vanilla overworld biome generates, and with them every vanilla overworld structure. Most are derived from climate signals the classifier already computed, so no model changes were needed:
 
 - **Oceans** — `deep_ocean`, `deep_cold_ocean`, `deep_frozen_ocean`, `lukewarm_ocean`, `deep_lukewarm_ocean`
 - **Forests** — `dark_forest`, `birch_forest`, `old_growth_birch_forest`, `old_growth_pine_taiga`, `old_growth_spruce_taiga`
 - **Jungle and wetland** — `sparse_jungle`, `bamboo_jungle`, `mangrove_swamp`
 - **Dry and high** — `wooded_badlands`, `eroded_badlands`, `savanna_plateau`, `windswept_savanna`, `windswept_forest`, `windswept_gravelly_hills`, `jagged_peaks`, `ice_spikes`
+- **Accents** — `cherry_grove`, `flower_forest` and `sunflower_plains`, carved out of meadow, forest and plains in patches a couple of hundred blocks across. Sunflowers keep to real sunflower country: continental-interior plains with hot summers and cold winters, so coastal plains never grow them.
+- **Mushroom islands** — `mushroom_fields` covers small islands with nothing but open sea for a couple of thousand blocks on every side, mycelium running to the waterline. Only around one in eight qualifying islands gets it, so finding one still means something.
 - **Caves** — `dripstone_caves`, `lush_caves`, `deep_dark`, placed by depth below the local surface and biased by the biome above, so lush caves favour wet regions and dripstone dry ones
 
-`badlands` and `meadow` now generate as well, and `river` / `frozen_river` come with the river system below.
+`badlands` and `meadow` generate as well, and `river` / `frozen_river` come with the river system below.
 
 ### Shorelines
 

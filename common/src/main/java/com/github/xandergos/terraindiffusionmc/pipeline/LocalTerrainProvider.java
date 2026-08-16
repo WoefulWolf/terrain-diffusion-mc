@@ -165,6 +165,7 @@ public final class LocalTerrainProvider {
             CACHE.clear();
             PENDING.clear();
             RiverRegions.clear();
+            MushroomIslands.clear();
         }
     }
 
@@ -256,10 +257,18 @@ public final class LocalTerrainProvider {
             CACHE.clear();
             PENDING.clear();
             // Regions hold the old seed's rivers; without this they would be carved
-            // into the new seed's terrain until a world reload cleared them.
+            // into the new seed's terrain until a world reload cleared them. Island
+            // verdicts are seed-pure the same way.
             RiverRegions.clear();
+            MushroomIslands.clear();
             return null;
         });
+    }
+
+    /** Island verdict for one coarse cell, for the explorer and diagnostics. */
+    public static boolean isMushroomIslandCell(int ci, int cj) throws Exception {
+        return submitToInferenceThread(() ->
+                MushroomIslands.isMushroom(ci, cj, getInstance().pipeline, instanceSeed));
     }
 
     /** Change to a random new seed; returns the new seed value. */
@@ -426,6 +435,7 @@ public final class LocalTerrainProvider {
         float[] coastDist = BiomeClassifier.coastDistance(elevWide, shorePad, H, W);
         short[] biomeFlat = BiomeClassifier.classify(elevFlat, climate, i1, j1, elevPadded, H, W, NATIVE_RESOLUTION, coastDist);
         BiomeClassifier.applyShoreline(biomeFlat, elevFlat, elevWide, shorePad, coastDist, i1, j1, H, W, NATIVE_RESOLUTION);
+        stampMushroomIslands(elevFlat, biomeFlat, i1, j1, H, W, 1);
         float[] waterFlat = newWaterField(H * W);
         byte[] riverClassFlat = new byte[H * W];
         carveRivers(elevFlat, biomeFlat, climate, waterFlat, riverClassFlat, i1, j1, H, W, 1);
@@ -482,6 +492,7 @@ public final class LocalTerrainProvider {
         float[] coastDist = BiomeClassifier.coastDistance(elevWide, shorePad, H, W);
         short[] biomeFlat = BiomeClassifier.classify(elevSmooth, climate, i1, j1, elevPadded, H, W, pixelSizeM, coastDist);
         BiomeClassifier.applyShoreline(biomeFlat, elevSmooth, elevWide, shorePad, coastDist, i1, j1, H, W, pixelSizeM);
+        stampMushroomIslands(elevSmooth, biomeFlat, i1, j1, H, W, scale);
         float[] waterFlat = newWaterField(H * W);
         byte[] riverClassFlat = new byte[H * W];
         carveRivers(elevOut, biomeFlat, climate, waterFlat, riverClassFlat, i1, j1, H, W, scale);
@@ -1121,7 +1132,8 @@ public final class LocalTerrainProvider {
 
     private static boolean deltaReplaceable(short biome) {
         if (biome == BiomeClassifier.RIVER || biome == BiomeClassifier.FROZEN_RIVER
-                || biome == BiomeClassifier.SWAMP || biome == BiomeClassifier.MANGROVE_SWAMP) {
+                || biome == BiomeClassifier.SWAMP || biome == BiomeClassifier.MANGROVE_SWAMP
+                || biome == BiomeClassifier.MUSHROOM_FIELDS) {
             return false;
         }
         // Everything on the flats can silt over, beaches included; the sea keeps its ids.
@@ -1279,6 +1291,60 @@ public final class LocalTerrainProvider {
                 Arrays.copyOf(steeps, count), Arrays.copyOf(fades, count), edgeField,
                 params.freeboardBlocks, params.edgeWobbleBlocks, metresPerBlock,
                 BiomeClassifier.RIVER, BiomeClassifier.FROZEN_RIVER);
+    }
+
+    /**
+     * Overwrites the land of chosen remote islands with mushroom fields, shoreline
+     * included: a mushroom island runs mycelium to the waterline, which is why this
+     * comes after the beach pass. The verdict lives at coarse resolution, but an
+     * island's native coast can spill a little past its coarse cells, so land in the
+     * one-cell ring around a member cell is stamped too — remoteness guarantees that
+     * ring holds no foreign land to catch by mistake.
+     */
+    private void stampMushroomIslands(float[] elev, short[] biomeFlat,
+                                      int i1, int j1, int height, int width, int scale) {
+        int cellBlocks = MushroomIslands.CELL_NATIVE * scale;
+        int cr0 = Math.floorDiv(i1, cellBlocks) - 1;
+        int cr1 = Math.floorDiv(i1 + height - 1, cellBlocks) + 1;
+        int cc0 = Math.floorDiv(j1, cellBlocks) - 1;
+        int cc1 = Math.floorDiv(j1 + width - 1, cellBlocks) + 1;
+        int gh = cr1 - cr0 + 1, gw = cc1 - cc0 + 1;
+
+        boolean[] member = new boolean[gh * gw];
+        boolean any = false;
+        for (int r = 0; r < gh; r++) {
+            for (int c = 0; c < gw; c++) {
+                member[r * gw + c] = MushroomIslands.isMushroom(cr0 + r, cc0 + c, pipeline, instanceSeed);
+                any |= member[r * gw + c];
+            }
+        }
+        if (!any) return;
+
+        // Dilate by one cell for the native fringe, then stamp the tile's land.
+        boolean[] near = new boolean[gh * gw];
+        for (int r = 0; r < gh; r++) {
+            for (int c = 0; c < gw; c++) {
+                for (int dr = -1; dr <= 1 && !near[r * gw + c]; dr++) {
+                    for (int dc = -1; dc <= 1; dc++) {
+                        int nr = r + dr, nc = c + dc;
+                        if (nr < 0 || nr >= gh || nc < 0 || nc >= gw) continue;
+                        if (member[nr * gw + nc]) {
+                            near[r * gw + c] = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        for (int r = 0; r < height; r++) {
+            int pr = Math.floorDiv(i1 + r, cellBlocks) - cr0;
+            for (int c = 0; c < width; c++) {
+                int idx = r * width + c;
+                if (elev[idx] <= 0f) continue;
+                int pc = Math.floorDiv(j1 + c, cellBlocks) - cc0;
+                if (near[pr * gw + pc]) biomeFlat[idx] = BiomeClassifier.MUSHROOM_FIELDS;
+            }
+        }
     }
 
     /** Water surface for a column the rivers never reached. */

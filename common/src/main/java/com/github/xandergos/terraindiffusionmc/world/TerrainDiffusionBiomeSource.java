@@ -139,6 +139,10 @@ public class TerrainDiffusionBiomeSource extends BiomeSource {
                     entry((short) 45, vanilla(Biomes.DEEP_OCEAN)),
                     entry((short) 47, vanilla(Biomes.DEEP_COLD_OCEAN)),
                     entry((short) 49, vanilla(Biomes.DEEP_FROZEN_OCEAN)),
+                    entry((short) 2, vanilla(Biomes.SUNFLOWER_PLAINS)),
+                    entry((short) 9, vanilla(Biomes.FLOWER_FOREST)),
+                    entry((short) 30, vanilla(Biomes.CHERRY_GROVE)),
+                    entry((short) 50, vanilla(Biomes.MUSHROOM_FIELDS)),
                     entry((short) 108, this.biomeLookup.getOrThrow(FOREST_SPARSE)),
                     entry((short) 115, this.biomeLookup.getOrThrow(TAIGA_SPARSE)),
                     entry((short) 116, this.biomeLookup.getOrThrow(SNOWY_TAIGA_SPARSE))

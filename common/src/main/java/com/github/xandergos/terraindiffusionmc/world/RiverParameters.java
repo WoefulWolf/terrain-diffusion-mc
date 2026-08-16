@@ -13,8 +13,12 @@ public final class RiverParameters {
      * the systems which do qualify are fed from real high country — a permissive bar
      * hands out sources a few hundred metres up, where there is nothing upstream worth
      * walking to.
+     *
+     * <p>This is the dial that decides how far a player walks between rivers, and close to
+     * the only one that does: measured across a continent, it sets the median walk to water
+     * almost on its own, while the trace depth barely shifts it even at maximum.
      */
-    public static final int DEFAULT_MAIN_CHANNEL_CELLS = 150_000;
+    public static final int DEFAULT_MAIN_CHANNEL_CELLS = 500_000;
     /**
      * Catchment down to which a river's main stem is traced upstream: how far up its
      * valleys a river is followed before it stops being worth drawing.
@@ -28,8 +32,10 @@ public final class RiverParameters {
      *
      * <p>Set high by default so a river runs long and unbranched rather than arriving as
      * a delta of little streams; the rarity bar then keeps the systems themselves scarce.
+     * Deliberately short of the ceiling: pushed all the way up, a river loses the
+     * tributaries that make it read as a river, for very little gained in scarcity.
      */
-    public static final int DEFAULT_HEADWATER_CELLS = 5_000;
+    public static final int DEFAULT_HEADWATER_CELLS = 10_000;
 
     /**
      * Catchment that counts as a one-block spring, which every channel's width and depth
@@ -49,8 +55,16 @@ public final class RiverParameters {
     public static final float DEFAULT_WIDTH_EXPONENT = 0.6f;
     /** Blocks of bank above the waterline. */
     public static final float DEFAULT_FREEBOARD_BLOCKS = 1.0f;
-    /** Smallest basin, in native cells, that fills as a lake instead of being carved through. */
-    public static final int DEFAULT_LAKE_MIN_CELLS = 250;
+    /**
+     * Smallest basin, in native cells, that fills as a lake instead of being carved through.
+     *
+     * <p>Set high so lakes are landmarks rather than scenery. This governs how MANY lakes
+     * there are and almost nothing else: raising it leaves the large basins untouched and
+     * clears out the small ones, so the count falls sharply while the water covered barely
+     * moves — the big basins hold nearly all of it. Requiring a deeper flood instead does
+     * not work, because the basins this terrain makes are deep as well as broad.
+     */
+    public static final int DEFAULT_LAKE_MIN_CELLS = 6_000;
     /**
      * Blocks of water a lake reaches where its basin is deep enough to earn it. The bed
      * tapers up to its shore rather than holding this everywhere, so this is the middle
@@ -86,7 +100,8 @@ public final class RiverParameters {
                            float widthExponent, float freeboardBlocks,
                            int lakeMinCells, float lakeDepthBlocks,
                            float edgeWobbleBlocks, float bedReliefBlocks) {
-        this.mainChannelCells = clamp(mainChannelCells, 1000, 500_000);
+        // Headroom above the default, so a world can still be made drier than stock.
+        this.mainChannelCells = clamp(mainChannelCells, 1000, 2_000_000);
         this.headwaterCells = clamp(headwaterCells, 50, 20_000);
         this.widthReferenceCells = clamp(widthReferenceCells, 50, 20_000);
         this.maxWidthBlocks = clamp(maxWidthBlocks, 5, 121);

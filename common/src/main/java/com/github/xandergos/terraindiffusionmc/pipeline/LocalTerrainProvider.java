@@ -631,7 +631,7 @@ public final class LocalTerrainProvider {
      */
     public static float baseRiverHalfWidthBlocks(float flow) {
         RiverParameters params = WorldScaleManager.getRiverParameters();
-        float catchment = Math.max(1f, flow / params.headwaterCells);
+        float catchment = Math.max(1f, flow / params.widthReferenceCells);
         return Math.min(params.maxHalfWidth(),
                 RIVER_WIDTH_AT_REFERENCE * (float) Math.pow(catchment, params.widthExponent));
     }
@@ -837,7 +837,7 @@ public final class LocalTerrainProvider {
             float[] pDepth = new float[len];
             float[] pSteep = new float[len];
             for (int k = 0; k < len; k++) {
-                float catchment = Math.max(1f, path.flow[k] / params.headwaterCells);
+                float catchment = Math.max(1f, path.flow[k] / params.widthReferenceCells);
                 float gradient = gradientAt(path, k) / metresPerBlock;
                 float steep = clamp01(gradient / RIVER_STEEP_GRADIENT);
 

@@ -6,25 +6,43 @@ package com.github.xandergos.terraindiffusionmc.world;
  */
 public final class RiverParameters {
 
-    /** Catchment a system must reach somewhere along its run to count as a river at all. */
-    public static final int DEFAULT_MAIN_CHANNEL_CELLS = 20000;
     /**
-     * Catchment down to which a river's main stem is traced upstream, and the reference
-     * every channel width is measured against.
+     * Catchment a system must reach somewhere along its run to count as a river at all.
      *
-     * <p>This carries far more weight than the name suggests, and pulls in a direction
-     * most people expect the opposite of. Lowering it does not simply make sources
-     * smaller: the trace walks further up every valley, so one river system fans out
-     * into many more tributaries, each of which is a channel in its own right. Measured
-     * over a region, cutting it tenfold multiplies the channel count about ninefold —
-     * enough to swamp a rarity setting raised tenfold at the same time, since rarity
-     * only decides which systems qualify, not how far each is followed.
-     *
-     * <p>It also scales width, because a channel's size is its flow measured against
-     * this number, so the same tenfold cut widens every river roughly fourfold. Two
-     * jobs in one dial; splitting them would let either be set without the other.
+     * <p>Set high enough that meeting a river is an event rather than scenery, and that
+     * the systems which do qualify are fed from real high country — a permissive bar
+     * hands out sources a few hundred metres up, where there is nothing upstream worth
+     * walking to.
      */
-    public static final int DEFAULT_HEADWATER_CELLS = 600;
+    public static final int DEFAULT_MAIN_CHANNEL_CELLS = 150_000;
+    /**
+     * Catchment down to which a river's main stem is traced upstream: how far up its
+     * valleys a river is followed before it stops being worth drawing.
+     *
+     * <p>It pulls in the direction most people expect the opposite of. Lowering it does
+     * not simply make sources smaller — the trace walks further up every valley, so one
+     * river system fans out into many more tributaries, each a channel in its own right.
+     * Measured over a region, cutting it tenfold multiplies the channel count about
+     * ninefold, enough to swamp a rarity setting raised tenfold alongside it, since
+     * rarity only decides which systems qualify, not how far each is followed.
+     *
+     * <p>Set high by default so a river runs long and unbranched rather than arriving as
+     * a delta of little streams; the rarity bar then keeps the systems themselves scarce.
+     */
+    public static final int DEFAULT_HEADWATER_CELLS = 5_000;
+
+    /**
+     * Catchment that counts as a one-block spring, which every channel's width and depth
+     * are measured against.
+     *
+     * <p>Deliberately its own dial rather than the trace depth, because the two want
+     * opposite settings and one number cannot serve both: tracing wants a high bar so
+     * rivers stay few and long, while width wants a low one so those rivers are broad
+     * enough to be worth the walk. Tie them together and a world can have rare rivers or
+     * majestic ones but not both, since every step towards scarcity is also a step
+     * towards narrower channels.
+     */
+    public static final int DEFAULT_WIDTH_REFERENCE_CELLS = 600;
     public static final int DEFAULT_MAX_WIDTH_BLOCKS = 51;
     public static final int DEFAULT_MAX_DEPTH_BLOCKS = 5;
     /** Power of width against catchment; near real hydraulic geometry. */
@@ -45,7 +63,7 @@ public final class RiverParameters {
     public static final float DEFAULT_BED_RELIEF_BLOCKS = 2.0f;
 
     public static final RiverParameters DEFAULT = new RiverParameters(
-            DEFAULT_MAIN_CHANNEL_CELLS, DEFAULT_HEADWATER_CELLS,
+            DEFAULT_MAIN_CHANNEL_CELLS, DEFAULT_HEADWATER_CELLS, DEFAULT_WIDTH_REFERENCE_CELLS,
             DEFAULT_MAX_WIDTH_BLOCKS, DEFAULT_MAX_DEPTH_BLOCKS,
             DEFAULT_WIDTH_EXPONENT, DEFAULT_FREEBOARD_BLOCKS,
             DEFAULT_LAKE_MIN_CELLS, DEFAULT_LAKE_DEPTH_BLOCKS,
@@ -53,6 +71,7 @@ public final class RiverParameters {
 
     public final int mainChannelCells;
     public final int headwaterCells;
+    public final int widthReferenceCells;
     public final int maxWidthBlocks;
     public final int maxDepthBlocks;
     public final float widthExponent;
@@ -62,13 +81,14 @@ public final class RiverParameters {
     public final float edgeWobbleBlocks;
     public final float bedReliefBlocks;
 
-    public RiverParameters(int mainChannelCells, int headwaterCells,
+    public RiverParameters(int mainChannelCells, int headwaterCells, int widthReferenceCells,
                            int maxWidthBlocks, int maxDepthBlocks,
                            float widthExponent, float freeboardBlocks,
                            int lakeMinCells, float lakeDepthBlocks,
                            float edgeWobbleBlocks, float bedReliefBlocks) {
         this.mainChannelCells = clamp(mainChannelCells, 1000, 500_000);
         this.headwaterCells = clamp(headwaterCells, 50, 20_000);
+        this.widthReferenceCells = clamp(widthReferenceCells, 50, 20_000);
         this.maxWidthBlocks = clamp(maxWidthBlocks, 5, 121);
         this.maxDepthBlocks = clamp(maxDepthBlocks, 2, 24);
         this.widthExponent = clamp(widthExponent, 0.3f, 1.5f);

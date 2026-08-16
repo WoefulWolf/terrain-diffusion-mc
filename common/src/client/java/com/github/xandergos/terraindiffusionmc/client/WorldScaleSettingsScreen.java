@@ -49,6 +49,7 @@ public final class WorldScaleSettingsScreen extends Screen {
     private RiverMode riverMode = RiverMode.DEFAULT;
     private EditBox riverRarityField;
     private EditBox riverSourceField;
+    private EditBox riverWidthReferenceField;
     private EditBox riverWidthField;
     private EditBox riverDepthField;
     private EditBox riverWidthGrowthField;
@@ -114,30 +115,33 @@ public final class WorldScaleSettingsScreen extends Screen {
         riverSourceField = addLabeledField(right, centerY - 38, "Smallest stream", String.valueOf(p.headwaterCells),
                 "The smallest stream still worth drawing. Lower: rivers are followed further up "
                         + "their valleys, filling the map with tributaries. Higher: only "
-                        + "substantial branches survive. It is also the size that counts as a "
-                        + "one-block spring, so lowering it widens every river.");
+                        + "substantial branches survive.");
         riverWidthField = addLabeledField(left, centerY - 8, "Max width", String.valueOf(p.maxWidthBlocks),
                 "The widest a river can grow, in blocks. Higher: major rivers become enormous. "
                         + "Lower: even the biggest stay modest.");
         riverDepthField = addLabeledField(right, centerY - 8, "Max depth", String.valueOf(p.maxDepthBlocks),
                 "The deepest a river can carve, in blocks. Higher: deep gorges under big rivers. "
                         + "Lower: everything stays shallow.");
-        riverWidthGrowthField = addLabeledField(left, centerY + 22, "Width growth", String.valueOf(p.widthExponent),
+        riverWidthReferenceField = addLabeledField(left, centerY + 22, "Width reference",
+                String.valueOf(p.widthReferenceCells),
+                "The catchment that counts as a one-block spring. Lower: rivers run broad and "
+                        + "deep for the water they carry. Higher: channels stay tight.");
+        riverWidthGrowthField = addLabeledField(right, centerY + 22, "Width growth", String.valueOf(p.widthExponent),
                 "How quickly a river widens as streams join it. Higher: wide soon after the "
                         + "source. Lower: narrow for most of its run.");
-        riverBankHeightField = addLabeledField(right, centerY + 22, "Bank height", String.valueOf(p.freeboardBlocks),
+        riverBankHeightField = addLabeledField(left, centerY + 52, "Bank height", String.valueOf(p.freeboardBlocks),
                 "How high the banks stand above the water, in blocks. Higher: rivers sit sunken "
                         + "below the land. Lower: water sits nearly level with it.");
-        riverLakeSizeField = addLabeledField(left, centerY + 52, "Lake size", String.valueOf(p.lakeMinCells),
-                "The smallest hollow that fills as a lake instead of the river carving through. "
-                        + "Higher: only large basins become lakes. Lower: many small ponds.");
-        riverLakeDepthField = addLabeledField(right, centerY + 52, "Lake depth", String.valueOf(p.lakeDepthBlocks),
-                "How deep lakes are dug, in blocks. Higher: deep swimmable lakes. "
-                        + "Lower: shallow sheets of water.");
-        riverWobbleField = addLabeledField(left, centerY + 82, "Bank wobble", String.valueOf(p.edgeWobbleBlocks),
+        riverWobbleField = addLabeledField(right, centerY + 52, "Bank wobble", String.valueOf(p.edgeWobbleBlocks),
                 "How ragged the shorelines of big rivers are, in blocks. Higher: wild, irregular "
                         + "banks. Lower: smooth, even curves.");
-        riverBedReliefField = addLabeledField(right, centerY + 82, "Bed relief", String.valueOf(p.bedReliefBlocks),
+        riverLakeSizeField = addLabeledField(left, centerY + 82, "Lake size", String.valueOf(p.lakeMinCells),
+                "The smallest hollow that fills as a lake instead of the river carving through. "
+                        + "Higher: only large basins become lakes. Lower: many small ponds.");
+        riverLakeDepthField = addLabeledField(right, centerY + 82, "Lake depth", String.valueOf(p.lakeDepthBlocks),
+                "How deep lakes are dug, in blocks. Higher: deep swimmable lakes. "
+                        + "Lower: shallow sheets of water.");
+        riverBedReliefField = addLabeledField(left, centerY + 112, "Bed relief", String.valueOf(p.bedReliefBlocks),
                 "How bumpy river and lake floors are, in blocks. Higher: underwater dunes and "
                         + "hollows. Lower: flat floors.");
 
@@ -174,13 +178,13 @@ public final class WorldScaleSettingsScreen extends Screen {
                         + "0: no banding, climate ignores position as before.");
 
         this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> onDonePressed())
-                .bounds(centerX - BUTTON_WIDTH - 5, centerY + 116, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .bounds(centerX - BUTTON_WIDTH - 5, centerY + 146, BUTTON_WIDTH, BUTTON_HEIGHT)
                 .build());
         this.addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> onClose())
-                .bounds(centerX + 5, centerY + 116, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .bounds(centerX + 5, centerY + 146, BUTTON_WIDTH, BUTTON_HEIGHT)
                 .build());
 
-        validationTextWidget = new StringWidget(0, centerY + 140, this.width, 9, Component.empty(), this.font);
+        validationTextWidget = new StringWidget(0, centerY + 170, this.width, 9, Component.empty(), this.font);
         this.addRenderableWidget(validationTextWidget);
     }
 
@@ -257,6 +261,7 @@ public final class WorldScaleSettingsScreen extends Screen {
                 riverParameters = new RiverParameters(
                         Integer.parseInt(riverRarityField.getValue().trim()),
                         Integer.parseInt(riverSourceField.getValue().trim()),
+                        Integer.parseInt(riverWidthReferenceField.getValue().trim()),
                         Integer.parseInt(riverWidthField.getValue().trim()),
                         Integer.parseInt(riverDepthField.getValue().trim()),
                         Float.parseFloat(riverWidthGrowthField.getValue().trim()),

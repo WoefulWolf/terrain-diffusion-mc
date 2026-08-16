@@ -61,6 +61,8 @@ public final class WorldScaleSettingsState extends SavedData {
                         .forGetter(p -> p.mainChannelCells),
                 Codec.INT.optionalFieldOf("headwater_cells", RiverParameters.DEFAULT_HEADWATER_CELLS)
                         .forGetter(p -> p.headwaterCells),
+                Codec.INT.optionalFieldOf("width_reference", RiverParameters.DEFAULT_WIDTH_REFERENCE_CELLS)
+                        .forGetter(p -> p.widthReferenceCells),
                 Codec.INT.optionalFieldOf("max_width", RiverParameters.DEFAULT_MAX_WIDTH_BLOCKS)
                         .forGetter(p -> p.maxWidthBlocks),
                 Codec.INT.optionalFieldOf("max_depth", RiverParameters.DEFAULT_MAX_DEPTH_BLOCKS)

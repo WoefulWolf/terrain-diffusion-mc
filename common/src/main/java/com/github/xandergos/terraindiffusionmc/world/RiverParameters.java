@@ -9,8 +9,20 @@ public final class RiverParameters {
     /** Catchment a system must reach somewhere along its run to count as a river at all. */
     public static final int DEFAULT_MAIN_CHANNEL_CELLS = 20000;
     /**
-     * Catchment down to which a river's main stem is traced upstream; also the width
-     * reference, so a river starts as a one-block spring wherever the trace ends.
+     * Catchment down to which a river's main stem is traced upstream, and the reference
+     * every channel width is measured against.
+     *
+     * <p>This carries far more weight than the name suggests, and pulls in a direction
+     * most people expect the opposite of. Lowering it does not simply make sources
+     * smaller: the trace walks further up every valley, so one river system fans out
+     * into many more tributaries, each of which is a channel in its own right. Measured
+     * over a region, cutting it tenfold multiplies the channel count about ninefold —
+     * enough to swamp a rarity setting raised tenfold at the same time, since rarity
+     * only decides which systems qualify, not how far each is followed.
+     *
+     * <p>It also scales width, because a channel's size is its flow measured against
+     * this number, so the same tenfold cut widens every river roughly fourfold. Two
+     * jobs in one dial; splitting them would let either be set without the other.
      */
     public static final int DEFAULT_HEADWATER_CELLS = 600;
     public static final int DEFAULT_MAX_WIDTH_BLOCKS = 51;

@@ -109,12 +109,13 @@ public final class WorldScaleSettingsScreen extends Screen {
         RiverParameters p = WorldScaleSelectionState.getPendingRiverParametersOrDefault();
         int left = riversCenter - 75, right = riversCenter + 3;
         riverRarityField = addLabeledField(left, centerY - 38, "Rarity", String.valueOf(p.mainChannelCells),
-                "How much land must drain together before a river forms at all. "
-                        + "Higher: fewer, rarer rivers. Lower: rivers everywhere.");
-        riverSourceField = addLabeledField(right, centerY - 38, "Source size", String.valueOf(p.headwaterCells),
-                "How small a stream can be at its source. Lower: springs start higher in the "
-                        + "mountains and rivers run longer. Higher: rivers appear further downhill, "
-                        + "already grown.");
+                "How much land must drain together before a river forms at all. Higher: fewer, "
+                        + "rarer rivers, sources higher up. Lower: rivers everywhere.");
+        riverSourceField = addLabeledField(right, centerY - 38, "Smallest stream", String.valueOf(p.headwaterCells),
+                "The smallest stream still worth drawing. Lower: rivers are followed further up "
+                        + "their valleys, filling the map with tributaries. Higher: only "
+                        + "substantial branches survive. It is also the size that counts as a "
+                        + "one-block spring, so lowering it widens every river.");
         riverWidthField = addLabeledField(left, centerY - 8, "Max width", String.valueOf(p.maxWidthBlocks),
                 "The widest a river can grow, in blocks. Higher: major rivers become enormous. "
                         + "Lower: even the biggest stay modest.");

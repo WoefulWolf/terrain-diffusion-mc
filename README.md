@@ -170,7 +170,9 @@ For Terrain Diffusion worlds, click **Customize** in world creation. Everything 
 
 **Rivers**: `Off` disables the system entirely; `Fast` analyses drainage in small regions (short, frequent generation pauses, smaller biggest-rivers); `Detailed` uses large regions (rarer but longer pauses, room for major rivers).
 
-Below the mode sit ten river parameters — rarity, source size, maximum width and depth, width growth, bank height, lake size and depth, bank wobble, and bed relief. Every field has a hover tooltip explaining in plain terms what raising or lowering it does; the defaults are the tuned values.
+Below the mode sit ten river parameters — rarity, smallest stream, maximum width and depth, width growth, bank height, lake size and depth, bank wobble, and bed relief. Every field has a hover tooltip explaining in plain terms what raising or lowering it does; the defaults are the tuned values.
+
+Two of them pull against each other. **Rarity** decides how many separate river systems exist; **smallest stream** decides how far up its valleys each one is followed, and is much the stronger of the two — set it low and tributaries fill the map whatever rarity says. For fewer, larger, mountain-born rivers, raise smallest stream rather than lowering it.
 
 **Caves**: two cover depths control how far below the surface caves must stay in gentle country — one for small tunnels and ravines, one for big caverns and their wide mouths. Craggy, rocky, and karst-like country still opens as described above. Set a field to `0` to switch that gate off and let those breaks appear anywhere, the way vanilla generates.
 

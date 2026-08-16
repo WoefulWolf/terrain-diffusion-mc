@@ -592,6 +592,7 @@
         <button id="mode-elevation">Elevation</button>
         <button id="mode-temperature">Temperature</button>
         <button id="mode-rivers">Rivers</button>
+        <button id="mode-biomes">Biomes</button>
         <span class="panel-info" id="detail-info">click coarse map to load</span>
       </div>
       <div class="nav-grid">
@@ -873,14 +874,18 @@
     if (state.detailCI === null) return;
     const { detailCI: ci, detailCJ: cj, detailPanI: pi, detailPanJ: pj, seed } = state;
     try {
-      const res = await fetch(`/api/detail_raw?ci=${ci}&cj=${cj}&detail_size=${DETAIL_SIZE}&pan_i=${pi}&pan_j=${pj}&_s=${seed}`);
+      const wantBiomes = state.detailMode === 'biomes' ? 1 : 0;
+      const res = await fetch(`/api/detail_raw?ci=${ci}&cj=${cj}&detail_size=${DETAIL_SIZE}&pan_i=${pi}&pan_j=${pj}&biomes=${wantBiomes}&_s=${seed}`);
       const h = parseInt(res.headers.get('X-Height'));
       const w = parseInt(res.headers.get('X-Width'));
       const hasTemp = res.headers.get('X-Has-Temp') === '1';
+      const hasBiome = res.headers.get('X-Has-Biome') === '1';
       const buf = await res.arrayBuffer();
+      const tempBytes = hasTemp ? h * w * 4 : 0;
       state.detailRaw = {
         elev: new Int16Array(buf, 0, h * w),
         temp: hasTemp ? new Float32Array(buf, h * w * 2, h * w) : null,
+        biome: hasBiome ? new Int16Array(buf, h * w * 2 + tempBytes, h * w) : null,
         h, w,
       };
     } catch (_) {}
@@ -971,13 +976,18 @@
   // ── Detail hover ──
   detailImg.addEventListener('mousemove', (e) => {
     if (!state.detailRaw) return;
-    const { elev, temp, h, w } = state.detailRaw;
+    const { elev, temp, biome, h, w } = state.detailRaw;
     const rect = detailImg.getBoundingClientRect();
     const col = Math.floor((e.clientX - rect.left) / rect.width  * w);
     const row = Math.floor((e.clientY - rect.top)  / rect.height * h);
     if (row < 0 || row >= h || col < 0 || col >= w) return;
     const idx = row * w + col;
-    let html = `<div class="ht-row"><span class="ht-label">Elevation</span><span class="ht-val">${elev[idx]} m</span></div>`;
+    let html = '';
+    if (biome) {
+      const name = BIOME_NAMES[biome[idx]] || `id ${biome[idx]}`;
+      html += `<div class="ht-row"><span class="ht-label">Biome</span><span class="ht-val">${name}</span></div>`;
+    }
+    html += `<div class="ht-row"><span class="ht-label">Elevation</span><span class="ht-val">${elev[idx]} m</span></div>`;
     if (temp) html += `<div class="ht-row"><span class="ht-label">Temperature</span><span class="ht-val">${temp[idx].toFixed(2)}°</span></div>`;
     showTooltip(e, html);
   });
@@ -1026,7 +1036,10 @@
   }
 
   // ── Detail mode ──
-  const DETAIL_MODES = ['relief', 'elevation', 'temperature', 'rivers'];
+  // Filled from the server at startup, so biome names are never restated here.
+  let BIOME_NAMES = {};
+
+  const DETAIL_MODES = ['relief', 'elevation', 'temperature', 'rivers', 'biomes'];
   DETAIL_MODES.forEach(mode => {
     document.getElementById(`mode-${mode}`).addEventListener('click', () => {
       state.detailMode = mode;
@@ -1133,6 +1146,9 @@
       state.coordScale = data.scale || 1;
       seedDisplay.textContent = data.seed;
       buildChannelButtons(data.channels);
+      try {
+        BIOME_NAMES = await (await fetch('/api/biome_names.json')).json();
+      } catch (_) {}
       updateCoordScale();
       updateCoarseZoomLabel();
       statusBar.textContent = `Connected — seed ${data.seed} | scale ${data.scale}×`;

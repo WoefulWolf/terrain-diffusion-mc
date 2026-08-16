@@ -80,6 +80,7 @@ public final class ExplorerServer {
         server.createContext("/api/rivers.png", ExplorerServer::handleRiversPng);
         server.createContext("/api/detail.png", ExplorerServer::handleDetailPng);
         server.createContext("/api/detail_raw", ExplorerServer::handleDetailRaw);
+        server.createContext("/api/biome_names.json", ExplorerServer::handleBiomeNames);
         // Single-thread executor matches Python's threaded=False
         server.setExecutor(Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "terrain-explorer-http");
@@ -461,6 +462,70 @@ public final class ExplorerServer {
     }
 
     /**
+     * Biome ids across a native-pixel window, sampled from the very tiles the game
+     * generates rather than re-derived here. That costs a little more than classifying
+     * the window directly, and is the whole point: rivers, shorelines, deltas and island
+     * mycelium are laid down by later passes, so anything short of the real tile shows a
+     * map the player will never see. The tiles are ordinary cache entries, shared with
+     * generation and sized like it, instead of one window-shaped block of memory.
+     *
+     * @param size output side in native pixels; one sample per pixel
+     */
+    private static short[] biomeGrid(int nativeI0, int nativeJ0, int size) {
+        int scale = WorldScaleManager.getCurrentScale();
+        int tileSize = TerrainDiffusionConfig.tileSize();
+        int tileShift = Integer.numberOfTrailingZeros(tileSize);
+        LocalTerrainProvider provider = LocalTerrainProvider.getInstance();
+
+        short[] out = new short[size * size];
+        int blockI0 = nativeI0 * scale, blockJ0 = nativeJ0 * scale;
+        int span = size * scale;
+
+        int ti0 = blockI0 >> tileShift, ti1 = (blockI0 + span - 1) >> tileShift;
+        int tj0 = blockJ0 >> tileShift, tj1 = (blockJ0 + span - 1) >> tileShift;
+
+        for (int ti = ti0; ti <= ti1; ti++) {
+            for (int tj = tj0; tj <= tj1; tj++) {
+                int bi = ti << tileShift, bj = tj << tileShift;
+                LocalTerrainProvider.HeightmapData data =
+                        provider.fetchHeightmap(bi, bj, bi + tileSize, bj + tileSize);
+                if (data == null || data.biomeIds == null) continue;
+
+                // Output rows whose sampled block lands inside this tile, so every
+                // pixel is visited exactly once across all tiles.
+                int rLo = Math.max(0, ceilDiv(bi - blockI0, scale));
+                int rHi = Math.min(size, ceilDiv(bi + tileSize - blockI0, scale));
+                int cLo = Math.max(0, ceilDiv(bj - blockJ0, scale));
+                int cHi = Math.min(size, ceilDiv(bj + tileSize - blockJ0, scale));
+                for (int r = rLo; r < rHi; r++) {
+                    int localZ = blockI0 + r * scale - bi;
+                    for (int c = cLo; c < cHi; c++) {
+                        int localX = blockJ0 + c * scale - bj;
+                        out[r * size + c] = data.biomeIds[localZ][localX];
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    private static int ceilDiv(int a, int b) {
+        return -Math.floorDiv(-a, b);
+    }
+
+    /** GET /api/biome_names.json → {id: name} for the hover readout. */
+    private static void handleBiomeNames(HttpExchange ex) throws IOException {
+        if (!ex.getRequestMethod().equalsIgnoreCase("GET")) { send405(ex); return; }
+        try {
+            Map<String, String> resp = new LinkedHashMap<>();
+            BiomeColors.names().forEach((id, name) -> resp.put(String.valueOf(id), name));
+            sendJson(ex, 200, resp);
+        } catch (Exception e) {
+            sendError(ex, 500, e.getMessage());
+        }
+    }
+
+    /**
      * GET /api/detail.png — port of detail_png().
      * Query params: ci, cj, detail_size, pan_i, pan_j, mode
      */
@@ -510,6 +575,9 @@ public final class ExplorerServer {
                 }
                 if (mode.equals("rivers")) {
                     overlayRivers(rgba, H, W, centerI - half, centerJ - half);
+                } else if (mode.equals("biomes")) {
+                    shadeByRelief(rgba, reliefRgb, biomeGrid(centerI - half, centerJ - half, H),
+                            H, W);
                 }
             }
 
@@ -558,23 +626,33 @@ public final class ExplorerServer {
             }
 
             boolean hasTemp = climate != null;
-            byte[] payload;
+            // Biomes are optional: naming a cell on hover is worth a tile fetch, but only
+            // when the caller is showing them, since it is far the costliest part here.
+            boolean wantBiomes = "1".equals(q.get("biomes"));
+            ByteBuffer biomeBuf = null;
+            if (wantBiomes) {
+                short[] ids = biomeGrid(centerI - half, centerJ - half, H);
+                biomeBuf = ByteBuffer.allocate(H * W * 2).order(ByteOrder.LITTLE_ENDIAN);
+                for (short id : ids) biomeBuf.putShort(id);
+            }
+
+            ByteArrayOutputStream body = new ByteArrayOutputStream();
+            body.write(elevBuf.array());
             if (hasTemp) {
-                // Temperature = climate[0..H*W] as float32 LE
                 ByteBuffer tempBuf = ByteBuffer.allocate(H * W * 4).order(ByteOrder.LITTLE_ENDIAN);
                 for (int i = 0; i < H * W; i++) tempBuf.putFloat(climate[i]);
-                payload = new byte[elevBuf.capacity() + tempBuf.capacity()];
-                System.arraycopy(elevBuf.array(), 0, payload, 0, elevBuf.capacity());
-                System.arraycopy(tempBuf.array(), 0, payload, elevBuf.capacity(), tempBuf.capacity());
-            } else {
-                payload = elevBuf.array();
+                body.write(tempBuf.array());
             }
+            if (biomeBuf != null) body.write(biomeBuf.array());
+            byte[] payload = body.toByteArray();
 
             ex.getResponseHeaders().set("Content-Type", "application/octet-stream");
             ex.getResponseHeaders().set("X-Height", String.valueOf(H));
             ex.getResponseHeaders().set("X-Width", String.valueOf(W));
             ex.getResponseHeaders().set("X-Has-Temp", hasTemp ? "1" : "0");
-            ex.getResponseHeaders().set("Access-Control-Expose-Headers", "X-Height, X-Width, X-Has-Temp");
+            ex.getResponseHeaders().set("X-Has-Biome", wantBiomes ? "1" : "0");
+            ex.getResponseHeaders().set("Access-Control-Expose-Headers",
+                    "X-Height, X-Width, X-Has-Temp, X-Has-Biome");
             ex.sendResponseHeaders(200, payload.length);
             ex.getResponseBody().write(payload);
         } catch (Exception e) {
@@ -637,6 +715,34 @@ public final class ExplorerServer {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ImageIO.write(img, "png", baos);
         return baos.toByteArray();
+    }
+
+    /**
+     * Paints biome colour over the hillshade, so hue says which biome and brightness
+     * still says where the slopes are — a flat wash of colour hides the landscape the
+     * biomes are sitting on. The shade is the relief's own brightness measured against
+     * the window's average, which keeps the effect the same whether the view is an
+     * alpine range or a coastal plain.
+     */
+    private static void shadeByRelief(float[][] rgba, float[][] reliefRgb, short[] biomes,
+                                      int H, int W) {
+        double sum = 0;
+        float[] lum = new float[H * W];
+        for (int i = 0; i < H * W; i++) {
+            lum[i] = 0.299f * reliefRgb[0][i] + 0.587f * reliefRgb[1][i] + 0.114f * reliefRgb[2][i];
+            sum += lum[i];
+        }
+        float mean = (float) (sum / Math.max(1, H * W));
+        if (mean < 1e-4f) mean = 1e-4f;
+
+        for (int i = 0; i < H * W; i++) {
+            int packed = BiomeColors.rgb(biomes[i]);
+            float shade = Math.max(0.45f, Math.min(1.35f, 0.55f + 0.45f * (lum[i] / mean)));
+            rgba[0][i] = clamp01(((packed >> 16) & 0xFF) / 255f * shade);
+            rgba[1][i] = clamp01(((packed >> 8) & 0xFF) / 255f * shade);
+            rgba[2][i] = clamp01((packed & 0xFF) / 255f * shade);
+            rgba[3][i] = 1f;
+        }
     }
 
     private static float[][] applyColormap1D(float[] data, int H, int W, float vmin, float vmax, String cmap) {

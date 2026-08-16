@@ -21,8 +21,12 @@ public final class RiverParameters {
     public static final float DEFAULT_FREEBOARD_BLOCKS = 1.0f;
     /** Smallest basin, in native cells, that fills as a lake instead of being carved through. */
     public static final int DEFAULT_LAKE_MIN_CELLS = 250;
-    /** Blocks of water a lake holds even where its basin is naturally shallower. */
-    public static final float DEFAULT_LAKE_DEPTH_BLOCKS = 3.0f;
+    /**
+     * Blocks of water a lake reaches where its basin is deep enough to earn it. The bed
+     * tapers up to its shore rather than holding this everywhere, so this is the middle
+     * of a lake rather than a floor under all of it.
+     */
+    public static final float DEFAULT_LAKE_DEPTH_BLOCKS = 5.0f;
     /** Blocks the waterline wobbles in and out on the largest rivers. */
     public static final float DEFAULT_EDGE_WOBBLE_BLOCKS = 5.0f;
     /** Blocks of coherent relief on river and lake floors. */

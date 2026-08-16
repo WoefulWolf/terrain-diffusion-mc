@@ -3,6 +3,7 @@ package com.github.xandergos.terraindiffusionmc.world;
 import com.github.xandergos.terraindiffusionmc.config.TerrainDiffusionConfig;
 import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider;
 import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider.HeightmapData;
+import com.github.xandergos.terraindiffusionmc.pipeline.river.BedMaterials;
 import com.github.xandergos.terraindiffusionmc.pipeline.river.RiverCarver;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
@@ -29,11 +30,6 @@ public final class RiverWaterFiller {
      * into the cave system below.
      */
     private static final int MAX_FILL_DEPTH = 48;
-
-    /** Above this the reach is a mountain stream: stone bed and rocky banks. */
-    private static final float STEEP_ROCKY = 0.55f;
-    /** Above this the current is quick enough to sweep sand away, leaving gravel. */
-    private static final float STEEP_GRAVEL = 0.25f;
 
     /** Blocks of bank wall repainted from the top down, so the risers show material too. */
     private static final int BANK_PAINT_DEPTH = 3;
@@ -87,6 +83,30 @@ public final class RiverWaterFiller {
         short metres = data.waterLevel[localZ][localX];
         if (metres == HeightmapData.NO_WATER) return Integer.MIN_VALUE;
         return HeightConverter.convertToMinecraftHeight(metres);
+    }
+
+    /**
+     * Whether a chunk sits in river or lake water deeply enough that a surface structure
+     * placed there would stand in it.
+     *
+     * <p>Sampled across the chunk rather than at a single column: a village on a lake
+     * shore is worth keeping, one in the lake is not, and only the spread of wet samples
+     * tells those apart. The centre alone is decisive because that is where a structure
+     * anchors; otherwise it takes most of the chunk being under water.
+     *
+     * @param minBlockX north-west block corner of the chunk
+     */
+    public static boolean standsInWater(int minBlockX, int minBlockZ) {
+        if (WorldScaleManager.getRiverMode() == RiverMode.OFF) return false;
+        if (waterSurfaceY(minBlockX + 8, minBlockZ + 8) != Integer.MIN_VALUE) return true;
+
+        int wet = 0;
+        for (int dx = 2; dx <= 14; dx += 6) {
+            for (int dz = 2; dz <= 14; dz += 6) {
+                if (waterSurfaceY(minBlockX + dx, minBlockZ + dz) != Integer.MIN_VALUE) wet++;
+            }
+        }
+        return wet >= 5;
     }
 
     public static void fill(ChunkAccess chunk) {
@@ -344,7 +364,7 @@ public final class RiverWaterFiller {
                         }
                         break;
                     }
-                } else if (steep >= STEEP_GRAVEL) {
+                } else if (steep >= BedMaterials.STEEP_GRAVEL) {
                     // Dry bank: rocky only where the reach is quick; a lazy meander keeps
                     // its natural grassy edge. Painted a few blocks down because the bank
                     // is a staircase, and one block would leave every riser in bare dirt.
@@ -364,23 +384,23 @@ public final class RiverWaterFiller {
         }
     }
 
+    private static BlockState stateOf(BedMaterials.Material material) {
+        return switch (material) {
+            case STONE -> STONE;
+            case COBBLESTONE -> COBBLESTONE;
+            case GRAVEL -> GRAVEL;
+            case SAND -> SAND;
+            case CLAY -> CLAY;
+            case DIRT -> DIRT;
+        };
+    }
+
     private static BlockState bedMaterial(float steep, boolean frozen, int x, int z) {
-        int h = mix(x, z);
-        if (steep >= STEEP_ROCKY) return h < 128 ? STONE : (h < 208 ? GRAVEL : COBBLESTONE);
-        if (steep >= STEEP_GRAVEL) return h < 192 ? GRAVEL : COBBLESTONE;
-        if (frozen) return h < 160 ? GRAVEL : DIRT;
-        // Slow beds settle in patches, so the material is rolled per 8-block pocket rather
-        // than per block: block-level rolls would pepper single blocks everywhere.
-        int pocket = mix(x >> 3, z >> 3);
-        if (pocket < 56) return h < 208 ? CLAY : SAND;
-        if (pocket < 128) return h < 192 ? DIRT : GRAVEL;
-        return h < 224 ? SAND : GRAVEL;
+        return stateOf(BedMaterials.bed(steep, frozen, x, z));
     }
 
     private static BlockState bankMaterial(float steep, int x, int z) {
-        int h = mix(x, z);
-        if (steep >= STEEP_ROCKY) return h < 144 ? STONE : GRAVEL;
-        return h < 208 ? GRAVEL : COBBLESTONE;
+        return stateOf(BedMaterials.bank(steep, x, z));
     }
 
     /**

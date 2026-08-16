@@ -109,15 +109,25 @@ public final class RiverRegions {
         public final int[] lakeBlockZ;
         /** Spill elevation of each lake cell in metres; water belongs just below it. */
         public final float[] lakeSurface;
+        /**
+         * Ground under each lake cell before the basin was filled, in metres. How far
+         * the surface stands above it is how deep the basin already was there, which is
+         * what lets a bed deepen away from its own shore instead of dropping to a flat
+         * pan at the waterline.
+         */
+        public final float[] lakeGround;
 
-        Region(List<RiverPath> paths, int[] lakeBlockX, int[] lakeBlockZ, float[] lakeSurface) {
+        Region(List<RiverPath> paths, int[] lakeBlockX, int[] lakeBlockZ,
+               float[] lakeSurface, float[] lakeGround) {
             this.paths = paths;
             this.lakeBlockX = lakeBlockX;
             this.lakeBlockZ = lakeBlockZ;
             this.lakeSurface = lakeSurface;
+            this.lakeGround = lakeGround;
         }
 
-        static final Region EMPTY = new Region(List.of(), new int[0], new int[0], new float[0]);
+        static final Region EMPTY = new Region(List.of(), new int[0], new int[0],
+                new float[0], new float[0]);
     }
 
     /** A channel as a run of block positions, ordered downstream. */
@@ -309,6 +319,7 @@ public final class RiverRegions {
         int[] lakeX = new int[lakeCount];
         int[] lakeZ = new int[lakeCount];
         float[] lakeSurface = new float[lakeCount];
+        float[] lakeGround = new float[lakeCount];
         int out = 0;
         for (int i = 0; i < n; i++) {
             if (!d.lake[i]) continue;
@@ -316,10 +327,11 @@ public final class RiverRegions {
             lakeX[out] = (j0 + col) * scale;
             lakeZ[out] = (i0 + row) * scale;
             lakeSurface[out] = d.filled[i];
+            lakeGround[out] = elev[i];
             out++;
         }
 
-        return new Region(paths, lakeX, lakeZ, lakeSurface);
+        return new Region(paths, lakeX, lakeZ, lakeSurface, lakeGround);
     }
 
     /**

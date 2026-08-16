@@ -1006,7 +1006,21 @@ public final class LocalTerrainProvider {
                 // the water just below its rim rather than leaving a dry pan.
                 if (level <= 0f) level = spill - 0.35f * metresPerBlock;
                 if (level <= 0f) continue;
-                float bedCap = level - lakeDepthBlocks * metresPerBlock;
+
+                // Measured from the spill, not the water level: the freeboard alone can
+                // exceed a basin's whole depth, and against the surface every ordinary
+                // basin would read as having none.
+                float naturalBlocks = Math.max(0f,
+                        (spill - region.lakeGround[k]) / metresPerBlock);
+                float taperRef = Math.max(0.25f, LAKE_TAPER_FRACTION * lakeDepthBlocks);
+                float t = clamp01(naturalBlocks / taperRef);
+                t = t * t * (3f - 2f * t);
+                float wobble = 1f + LAKE_DEPTH_WOBBLE
+                        * LAKE_BED_NOISE.GetNoise(region.lakeBlockX[k], region.lakeBlockZ[k]);
+                // Only ever lowers, so a basin already deeper than this keeps its own floor.
+                float depthBlocks = Math.max(LAKE_MIN_WATER_BLOCKS,
+                        lakeDepthBlocks * t * wobble);
+                float bedCap = level - depthBlocks * metresPerBlock;
                 for (int dz = 0; dz < scale; dz++) {
                     int row = region.lakeBlockZ[k] + dz - i1;
                     if (row < 0 || row >= height) continue;
@@ -1221,6 +1235,27 @@ public final class LocalTerrainProvider {
         }
     }
 
+    /**
+     * A lake bed deepens away from its shore instead of dropping to a flat pan at the
+     * waterline. How deep the basin already was stands in for distance from the bank —
+     * a rim is shallow precisely because the ground barely dips there — so the
+     * deepening follows the shape the terrain has rather than a ring measured out from
+     * the edge. Measured, most cells sit under a block of natural water and the
+     * deepest tenth under five, so the taper reaches full depth at a couple of blocks
+     * of natural basin. Slow noise on top keeps the floor off a machined curve.
+     */
+    private static final float LAKE_TAPER_FRACTION = 0.4f;
+    private static final float LAKE_DEPTH_WOBBLE = 0.25f;
+    /**
+     * Shallowest a lake may taper to and still hold water. Depth is metres here but
+     * water is placed in whole blocks, and a claim thinner than a block can land inside
+     * the block below it — the filler then finds solid ground where it expected air and
+     * writes nothing, leaving dry lake bed inside the waterline. The taper has to stop
+     * above that, or every lake gains a dry rim.
+     */
+    private static final float LAKE_MIN_WATER_BLOCKS = 1.25f;
+    private static final FastNoiseLite LAKE_BED_NOISE = makeFnl(0x1A6E5, 1f / 60f, 2, 2f, 0.5f);
+
     /** Picks which reaches of a lake shore are climbable; world-sampled so tiles agree. */
     private static final FastNoiseLite SHORE_EXIT_NOISE = makeFnl(0xE5CA, 1f / 28f, 2, 2f, 0.5f);
     private static final float SHORE_EXIT_NOISE_MIN = 0.12f;
@@ -1228,8 +1263,13 @@ public final class LocalTerrainProvider {
     /**
      * Coherent relief for every wetted floor. The carver stamps flat discs along the path,
      * and where they overlap the bed steps in concentric arcs that read as brush strokes
-     * from the surface. Sampled at world coordinates so tiles agree, and capped half a
-     * block under the water surface so the feathering can never break the waterline.
+     * from the surface. Sampled at world coordinates so tiles agree.
+     *
+     * <p>The floor is held a full block under the surface. Water is placed in whole
+     * blocks against a surface measured in metres, and a claim thinner than a block can
+     * round into the block below it: the filler then finds solid ground where it
+     * expected air and writes nothing, so a cell the carver called wet renders as dry
+     * bed. A whole block of clearance is what makes that impossible.
      */
     private static final FastNoiseLite BED_NOISE = makeFnl(0x52BED, 0.05f, 3, 2f, 0.5f);
     /** Waterline wobble, sampled at world coordinates so every tile draws the same edge. */
@@ -1240,7 +1280,7 @@ public final class LocalTerrainProvider {
                                     float metresPerBlock, float reliefBlocks) {
         if (waterFlat == null) return;
         float amp = reliefBlocks * metresPerBlock;
-        float clearance = 0.5f * metresPerBlock;
+        float clearance = 1.05f * metresPerBlock;
         for (int row = 0; row < height; row++) {
             for (int col = 0; col < width; col++) {
                 int idx = row * width + col;

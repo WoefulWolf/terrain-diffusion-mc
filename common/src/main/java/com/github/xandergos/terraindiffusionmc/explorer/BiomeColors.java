@@ -13,6 +13,9 @@ import java.util.Map;
  */
 public final class BiomeColors {
 
+    /** Biome whose colour stands for every body of water on a map, lakes included. */
+    public static final int WATER_ID = 36;
+
     private static final Map<Integer, String> NAMES = new LinkedHashMap<>();
     private static final Map<Integer, Integer> RGB = new LinkedHashMap<>();
 

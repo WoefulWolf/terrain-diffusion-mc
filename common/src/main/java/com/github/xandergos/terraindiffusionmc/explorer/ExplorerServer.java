@@ -398,6 +398,43 @@ public final class ExplorerServer {
     }
 
     /**
+     * Regions whose analysis reaches a native-pixel window, asked for exactly as world
+     * generation asks, so a map can only ever show water the generator will also place.
+     */
+    private static java.util.List<RiverRegions.Region> regionsFor(int i0, int j0, int H, int W)
+            throws Exception {
+        int scale = WorldScaleManager.getCurrentScale();
+        RiverRegions.Size size = WorldScaleManager.getRiverMode() == RiverMode.FAST
+                ? RiverRegions.Size.SMALL : RiverRegions.Size.LARGE;
+        return RiverRegions.forBlockWindow(
+                i0 * scale, j0 * scale, (i0 + H) * scale, (j0 + W) * scale,
+                scale, size, WorldScaleManager.getRiverParameters(),
+                (a, b, c, d) -> LocalTerrainProvider.getPipelineData(a, b, c, d, true));
+    }
+
+    /**
+     * Marks lake cells as water in a biome grid.
+     *
+     * <p>A lake keeps whatever biome its ground had before the water arrived, so a biome
+     * map drawn straight from the ids shows basins as savanna or forest while the rivers
+     * running into them are plainly blue. Painting the cells here rather than colouring
+     * them afterwards means they pick up the same relief shading as everything else.
+     */
+    private static void overlayLakeBiomes(short[] ids, int H, int W, int i0, int j0)
+            throws Exception {
+        if (WorldScaleManager.getRiverMode() == RiverMode.OFF) return;
+        int scale = WorldScaleManager.getCurrentScale();
+        for (RiverRegions.Region region : regionsFor(i0, j0, H, W)) {
+            for (int k = 0; k < region.lakeSurface.length; k++) {
+                int r = Math.floorDiv(region.lakeBlockZ[k], scale) - i0;
+                int c = Math.floorDiv(region.lakeBlockX[k], scale) - j0;
+                if (r < 0 || r >= H || c < 0 || c >= W) continue;
+                ids[r * W + c] = (short) BiomeColors.WATER_ID;
+            }
+        }
+    }
+
+    /**
      * Draws the rivers and lakes the generator will actually place: the same cached
      * region analysis, selection, and culling as world generation, so what this shows is
      * what a teleport finds. Any independent extraction here would happily display
@@ -405,16 +442,16 @@ public final class ExplorerServer {
      */
     private static void overlayRivers(float[][] rgba, int H, int W, int i0, int j0)
             throws Exception {
-        RiverMode mode = WorldScaleManager.getRiverMode();
-        if (mode == RiverMode.OFF) return;
+        if (WorldScaleManager.getRiverMode() == RiverMode.OFF) return;
         int scale = WorldScaleManager.getCurrentScale();
-        RiverRegions.Size size = mode == RiverMode.FAST
-                ? RiverRegions.Size.SMALL : RiverRegions.Size.LARGE;
+        java.util.List<RiverRegions.Region> regions = regionsFor(i0, j0, H, W);
 
-        java.util.List<RiverRegions.Region> regions = RiverRegions.forBlockWindow(
-                i0 * scale, j0 * scale, (i0 + H) * scale, (j0 + W) * scale,
-                scale, size, WorldScaleManager.getRiverParameters(),
-                (a, b, c, d) -> LocalTerrainProvider.getPipelineData(a, b, c, d, true));
+        // Lake and channel share one colour, because on the ground they are one body of
+        // water: a river running into a basin does not change shade at the shoreline.
+        int packed = BiomeColors.rgb(BiomeColors.WATER_ID);
+        float pr = ((packed >> 16) & 0xFF) / 255f;
+        float pg = ((packed >> 8) & 0xFF) / 255f;
+        float pb = (packed & 0xFF) / 255f;
 
         for (RiverRegions.Region region : regions) {
             for (int k = 0; k < region.lakeSurface.length; k++) {
@@ -422,22 +459,12 @@ public final class ExplorerServer {
                 int c = Math.floorDiv(region.lakeBlockX[k], scale) - j0;
                 if (r < 0 || r >= H || c < 0 || c >= W) continue;
                 int idx = r * W + c;
-                rgba[0][idx] = 0.16f; rgba[1][idx] = 0.44f; rgba[2][idx] = 0.74f;
+                rgba[0][idx] = pr; rgba[1][idx] = pg; rgba[2][idx] = pb;
             }
         }
 
-        int maxOrder = 1;
         for (RiverRegions.Region region : regions) {
             for (RiverRegions.RiverPath path : region.paths) {
-                maxOrder = Math.max(maxOrder, path.order);
-            }
-        }
-        for (RiverRegions.Region region : regions) {
-            for (RiverRegions.RiverPath path : region.paths) {
-                float t = maxOrder > 1 ? (path.order - 1f) / (maxOrder - 1f) : 1f;
-                float pr = 0.20f + 0.55f * t;
-                float pg = 0.62f + 0.33f * t;
-                float pb = 0.92f + 0.08f * t;
                 for (int k = 0; k < path.blockX.length; k++) {
                     if (path.submerged[k]) continue;
                     int r = Math.floorDiv(path.blockZ[k], scale) - i0;
@@ -576,8 +603,9 @@ public final class ExplorerServer {
                 if (mode.equals("rivers")) {
                     overlayRivers(rgba, H, W, centerI - half, centerJ - half);
                 } else if (mode.equals("biomes")) {
-                    shadeByRelief(rgba, reliefRgb, biomeGrid(centerI - half, centerJ - half, H),
-                            H, W);
+                    short[] ids = biomeGrid(centerI - half, centerJ - half, H);
+                    overlayLakeBiomes(ids, H, W, centerI - half, centerJ - half);
+                    shadeByRelief(rgba, reliefRgb, ids, H, W);
                 }
             }
 
@@ -632,6 +660,9 @@ public final class ExplorerServer {
             ByteBuffer biomeBuf = null;
             if (wantBiomes) {
                 short[] ids = biomeGrid(centerI - half, centerJ - half, H);
+                // Same water overlay the map is drawn with, so hovering a blue basin names
+                // it as water rather than as the shore biome underneath it.
+                overlayLakeBiomes(ids, H, W, centerI - half, centerJ - half);
                 biomeBuf = ByteBuffer.allocate(H * W * 2).order(ByteOrder.LITTLE_ENDIAN);
                 for (short id : ids) biomeBuf.putShort(id);
             }

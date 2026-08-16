@@ -998,40 +998,87 @@ public final class LocalTerrainProvider {
      * lowered to hold a minimum depth of water, because the basins this terrain makes are
      * broad but shallow, and left alone they would read as scattered puddles rather than a
      * lake.
+     *
+     * <p>Several regions routinely claim the same cell and disagree about how high it
+     * stands, because each floods only its own window and treats that window's edge as an
+     * outlet — a basin wider than one region drains over a different rim in each of them.
+     * Claims are therefore reconciled per cell before anything is stamped: taking whichever
+     * region is stamped first leaves one basin standing at three levels at once, terraced,
+     * with the highest water in the middle. Clipping a basin can only ever let it drain
+     * sooner, so every claim is a lower bound on the true spill, and the highest of them is
+     * the one that saw most of the basin.
      */
     private static void stampLakes(List<RiverRegions.Region> regions, float[] elev,
                                    float[] waterFlat, byte[] riverClassFlat, float[] temperature,
                                    int i1, int j1, int height, int width,
                                    float metresPerBlock, float freeboardMetres,
                                    float lakeDepthBlocks, int scale) {
+        // A cell just outside the tile still lowers banks inside it, so the reconciled grid
+        // is padded rather than clipped to the tile edge. Cell coordinates come off the same
+        // global native grid in every region, so one shared cell lands on one slot whichever
+        // region contributed it.
+        int pad = 2;
+        int cz0 = Math.floorDiv(i1, scale) - pad;
+        int cz1 = Math.floorDiv(i1 + height - 1, scale) + pad;
+        int cx0 = Math.floorDiv(j1, scale) - pad;
+        int cx1 = Math.floorDiv(j1 + width - 1, scale) + pad;
+        int cw = cx1 - cx0 + 1, ch = cz1 - cz0 + 1;
+        float[] cellLevel = new float[ch * cw];
+        float[] cellSpill = new float[ch * cw];
+        float[] cellGround = new float[ch * cw];
+        Arrays.fill(cellSpill, Float.NEGATIVE_INFINITY);
+
         for (RiverRegions.Region region : regions) {
             for (int k = 0; k < region.lakeSurface.length; k++) {
-                float spill = region.lakeSurface[k];
-                float level = spill - freeboardMetres;
-                // A coastal basin can sit lower than a full freeboard above the sea. Tuck
-                // the water just below its rim rather than leaving a dry pan.
-                if (level <= 0f) level = spill - 0.35f * metresPerBlock;
-                if (level <= 0f) continue;
+                int cx = Math.floorDiv(region.lakeBlockX[k], scale) - cx0;
+                int cz = Math.floorDiv(region.lakeBlockZ[k], scale) - cz0;
+                if (cx < 0 || cx >= cw || cz < 0 || cz >= ch) continue;
+                int ci = cz * cw + cx;
+                if (region.lakeSurface[k] > cellSpill[ci]) {
+                    cellSpill[ci] = region.lakeSurface[k];
+                    cellGround[ci] = region.lakeGround[k];
+                }
+            }
+        }
+
+        for (int ci = 0; ci < cellLevel.length; ci++) {
+            float spill = cellSpill[ci];
+            if (spill == Float.NEGATIVE_INFINITY) {
+                cellLevel[ci] = Float.NEGATIVE_INFINITY;
+                continue;
+            }
+            float level = spill - freeboardMetres;
+            // A coastal basin can sit lower than a full freeboard above the sea. Tuck the
+            // water just below its rim rather than leaving a dry pan.
+            if (level <= 0f) level = spill - 0.35f * metresPerBlock;
+            cellLevel[ci] = level > 0f ? level : Float.NEGATIVE_INFINITY;
+        }
+
+        for (int cz = 0; cz < ch; cz++) {
+            for (int cx = 0; cx < cw; cx++) {
+                int ci = cz * cw + cx;
+                float level = cellLevel[ci];
+                if (level == Float.NEGATIVE_INFINITY) continue;
+                int blockX = (cx0 + cx) * scale, blockZ = (cz0 + cz) * scale;
 
                 // Measured from the spill, not the water level: the freeboard alone can
                 // exceed a basin's whole depth, and against the surface every ordinary
                 // basin would read as having none.
                 float naturalBlocks = Math.max(0f,
-                        (spill - region.lakeGround[k]) / metresPerBlock);
+                        (cellSpill[ci] - cellGround[ci]) / metresPerBlock);
                 float taperRef = Math.max(0.25f, LAKE_TAPER_FRACTION * lakeDepthBlocks);
                 float t = clamp01(naturalBlocks / taperRef);
                 t = t * t * (3f - 2f * t);
-                float wobble = 1f + LAKE_DEPTH_WOBBLE
-                        * LAKE_BED_NOISE.GetNoise(region.lakeBlockX[k], region.lakeBlockZ[k]);
+                float wobble = 1f + LAKE_DEPTH_WOBBLE * LAKE_BED_NOISE.GetNoise(blockX, blockZ);
                 // Only ever lowers, so a basin already deeper than this keeps its own floor.
                 float depthBlocks = Math.max(LAKE_MIN_WATER_BLOCKS,
                         lakeDepthBlocks * t * wobble);
                 float bedCap = level - depthBlocks * metresPerBlock;
                 for (int dz = 0; dz < scale; dz++) {
-                    int row = region.lakeBlockZ[k] + dz - i1;
+                    int row = blockZ + dz - i1;
                     if (row < 0 || row >= height) continue;
                     for (int dx = 0; dx < scale; dx++) {
-                        int col = region.lakeBlockX[k] + dx - j1;
+                        int col = blockX + dx - j1;
                         if (col < 0 || col >= width) continue;
                         int idx = row * width + col;
                         if (elev[idx] > bedCap) elev[idx] = bedCap;
@@ -1047,24 +1094,32 @@ public final class LocalTerrainProvider {
                         }
                     }
                 }
+            }
+        }
 
-                // A lake sits a freeboard below its shore, and a one-block wall of water
-                // cannot be climbed out of. Stretches of the shore ring are lowered flush
-                // with the surface, so some of the bank is always a way out. Chosen by a
-                // slow noise rather than per-block chance: coin-flipped blocks read as
-                // airbrush speckle, while a coherent field makes whole reaches of bank
-                // shallow with steep shore between them.
+        // A lake sits a freeboard below its shore, and a one-block wall of water cannot be
+        // climbed out of. Stretches of the shore ring are lowered flush with the surface, so
+        // some of the bank is always a way out. Chosen by a slow noise rather than per-block
+        // chance: coin-flipped blocks read as airbrush speckle, while a coherent field makes
+        // whole reaches of bank shallow with steep shore between them.
+        //
+        // Runs only once every lake is placed, so a shore is never cut down at a column the
+        // next cell was about to fill with water.
+        for (int cz = 0; cz < ch; cz++) {
+            for (int cx = 0; cx < cw; cx++) {
+                float level = cellLevel[cz * cw + cx];
+                if (level == Float.NEGATIVE_INFINITY) continue;
+                int blockX = (cx0 + cx) * scale, blockZ = (cz0 + cz) * scale;
                 for (int dz = -scale; dz < 2 * scale; dz++) {
-                    int row = region.lakeBlockZ[k] + dz - i1;
+                    int row = blockZ + dz - i1;
                     if (row < 0 || row >= height) continue;
                     for (int dx = -scale; dx < 2 * scale; dx++) {
-                        int col = region.lakeBlockX[k] + dx - j1;
+                        int col = blockX + dx - j1;
                         if (col < 0 || col >= width) continue;
                         int idx = row * width + col;
                         if (waterFlat == null || waterFlat[idx] != Float.NEGATIVE_INFINITY) continue;
                         if (elev[idx] <= level || elev[idx] > level + 1.4f * metresPerBlock) continue;
-                        float n = SHORE_EXIT_NOISE.GetNoise(
-                                region.lakeBlockX[k] + dx, region.lakeBlockZ[k] + dz);
+                        float n = SHORE_EXIT_NOISE.GetNoise(blockX + dx, blockZ + dz);
                         if (n > SHORE_EXIT_NOISE_MIN) elev[idx] = level + 0.05f * metresPerBlock;
                     }
                 }

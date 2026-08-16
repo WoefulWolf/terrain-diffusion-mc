@@ -47,6 +47,7 @@ public final class RiverWaterFiller {
     private static final BlockState ICE = Blocks.ICE.defaultBlockState();
     private static final BlockState STONE = Blocks.STONE.defaultBlockState();
     private static final BlockState COBBLESTONE = Blocks.COBBLESTONE.defaultBlockState();
+    private static final BlockState MOSSY_COBBLESTONE = Blocks.MOSSY_COBBLESTONE.defaultBlockState();
     private static final BlockState GRAVEL = Blocks.GRAVEL.defaultBlockState();
     private static final BlockState SAND = Blocks.SAND.defaultBlockState();
     private static final BlockState CLAY = Blocks.CLAY.defaultBlockState();
@@ -370,7 +371,7 @@ public final class RiverWaterFiller {
                     // is a staircase, and one block would leave every riser in bare dirt.
                     int topY = HeightConverter.convertToMinecraftHeight(
                             data.heightmap[localZ][localX]) - 1;
-                    BlockState material = bankMaterial(steep, x, z);
+                    BlockState material = bankMaterial(steep, data.biomeIds[localZ][localX], x, z);
                     for (int down = 0; down < BANK_PAINT_DEPTH; down++) {
                         int y = topY - down;
                         if (y <= minY) break;
@@ -388,6 +389,7 @@ public final class RiverWaterFiller {
         return switch (material) {
             case STONE -> STONE;
             case COBBLESTONE -> COBBLESTONE;
+            case MOSSY_COBBLESTONE -> MOSSY_COBBLESTONE;
             case GRAVEL -> GRAVEL;
             case SAND -> SAND;
             case CLAY -> CLAY;
@@ -395,12 +397,30 @@ public final class RiverWaterFiller {
         };
     }
 
-    private static BlockState bedMaterial(float steep, boolean frozen, int x, int z) {
-        return stateOf(BedMaterials.bed(steep, frozen, x, z));
+    /**
+     * Whether rock above the waterline stays damp enough for moss. A bank is only as
+     * wet as the air over it: stone standing above a river through desert or badlands
+     * bakes dry between floods, and snow country keeps it frozen, so both stay bare.
+     * Under the water the question does not arise — see {@link #bedMaterial}.
+     */
+    private static boolean bankIsDamp(short biomeId) {
+        return switch (biomeId) {
+            // desert, the badlands, the savannas
+            case 5, 26, 27, 28, 17, 18, 22 -> false;
+            // snowy plains and taiga, ice spikes, grove, snowy slopes and the frozen peaks
+            case 3, 4, 16, 31, 32, 33, 34, 39, 116 -> false;
+            default -> true;
+        };
     }
 
-    private static BlockState bankMaterial(float steep, int x, int z) {
-        return stateOf(BedMaterials.bank(steep, x, z));
+    private static BlockState bedMaterial(float steep, boolean frozen, int x, int z) {
+        // A submerged stone is wet whatever the sky above the valley is doing, so the
+        // only thing that keeps moss off a bed is the water being ice the year round.
+        return stateOf(BedMaterials.bed(steep, frozen, !frozen, x, z));
+    }
+
+    private static BlockState bankMaterial(float steep, short biomeId, int x, int z) {
+        return stateOf(BedMaterials.bank(steep, bankIsDamp(biomeId), x, z));
     }
 
     /**

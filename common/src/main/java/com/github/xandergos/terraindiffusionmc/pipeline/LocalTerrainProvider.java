@@ -893,6 +893,12 @@ public final class LocalTerrainProvider {
                     float scour = clamp01(1f - dDry[k] / LAKE_ENTRY_SCOUR_LEN_BLOCKS);
                     pDepth[k] = params.lakeDepthBlocks
                             + (boundaryDepth - params.lakeDepthBlocks) * scour;
+                    // Past the entry scour the lake's own floor is the floor. Carving on
+                    // cuts a fixed-depth channel across a bed that tapers, and the
+                    // descent that routed the path crossed filled, level ground, where
+                    // it can only run in straight lines — so the channel surfaces as a
+                    // ruled diagonal across the basin.
+                    pFade[k] *= scour;
                 } else if (dWet[k] < RIVER_LAKE_TRANSITION_BLOCKS) {
                     float t = dWet[k] / RIVER_LAKE_TRANSITION_BLOCKS;
                     pDepth[k] = boundaryDepth + (pDepth[k] - boundaryDepth) * t;

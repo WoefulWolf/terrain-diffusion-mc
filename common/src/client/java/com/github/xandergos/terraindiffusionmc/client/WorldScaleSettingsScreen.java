@@ -56,6 +56,7 @@ public final class WorldScaleSettingsScreen extends Screen {
     private EditBox riverBankHeightField;
     private EditBox riverLakeSizeField;
     private EditBox riverLakeDepthField;
+    private EditBox riverLakeInciseField;
     private EditBox riverWobbleField;
     private EditBox riverBedReliefField;
     private EditBox caveSmallSealField;
@@ -144,6 +145,12 @@ public final class WorldScaleSettingsScreen extends Screen {
         riverBedReliefField = addLabeledField(left, centerY + 112, "Bed relief", String.valueOf(p.bedReliefBlocks),
                 "How bumpy river and lake floors are, in blocks. Higher: underwater dunes and "
                         + "hollows. Lower: flat floors.");
+        riverLakeInciseField = addLabeledField(right, centerY + 112, "Outlet cut",
+                String.valueOf(p.lakeInciseBlocks),
+                "How far a basin's outlet has cut down through its rim, in blocks. Higher: "
+                        + "lakes sit lower and cover less ground, though past about two "
+                        + "blocks the water begins standing above its shore. Lower: "
+                        + "basins brim to their rim and flood every margin.");
 
         addCenteredTextWidget(CAVE_LABEL_TEXT, cavesCenter, centerY - 82, 0xFFFFFF);
 
@@ -268,6 +275,7 @@ public final class WorldScaleSettingsScreen extends Screen {
                         Float.parseFloat(riverBankHeightField.getValue().trim()),
                         Integer.parseInt(riverLakeSizeField.getValue().trim()),
                         Float.parseFloat(riverLakeDepthField.getValue().trim()),
+                        Float.parseFloat(riverLakeInciseField.getValue().trim()),
                         Float.parseFloat(riverWobbleField.getValue().trim()),
                         Float.parseFloat(riverBedReliefField.getValue().trim()));
             } catch (NumberFormatException exception) {

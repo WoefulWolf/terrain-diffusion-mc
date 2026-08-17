@@ -30,12 +30,14 @@ public final class RiverParameters {
      * ninefold, enough to swamp a rarity setting raised tenfold alongside it, since
      * rarity only decides which systems qualify, not how far each is followed.
      *
-     * <p>Set high by default so a river runs long and unbranched rather than arriving as
-     * a delta of little streams; the rarity bar then keeps the systems themselves scarce.
-     * Deliberately short of the ceiling: pushed all the way up, a river loses the
-     * tributaries that make it read as a river, for very little gained in scarcity.
+     * <p>Set low, because this is what puts springs on mountainsides. It cannot crowd the
+     * big rivers together: the rarity bar decides how many systems exist at all, and this
+     * only decides how far up each of them is followed, so everything it adds is a fine
+     * branch at the top of a system that was already there. Raised high it strips those
+     * branches and leaves nothing on the map under twenty blocks wide, which reads as a
+     * country of big rivers and no streams.
      */
-    public static final int DEFAULT_HEADWATER_CELLS = 10_000;
+    public static final int DEFAULT_HEADWATER_CELLS = 600;
 
     /**
      * Catchment that counts as a one-block spring, which every channel's width and depth
@@ -71,6 +73,26 @@ public final class RiverParameters {
      * of a lake rather than a floor under all of it.
      */
     public static final float DEFAULT_LAKE_DEPTH_BLOCKS = 5.0f;
+    /**
+     * Blocks a basin's outlet has cut down through its rim, and so how far below the level
+     * that would brim it the water sits.
+     *
+     * <p>The only dial that reaches how LARGE a basin is. A lake's shoreline is a contour of
+     * the terrain, so the one way to pull it in is to move the contour down; the size floor
+     * decides which hollows fill, never how far the water then spreads once one does.
+     *
+     * <p>Lowering the water is what makes this safe, where refusing the basin outright was
+     * not. Every cell the fill still raises is a lake, excavated and given a bed, while the
+     * cells left above the new level go back to being ordinary ground, so nothing can lay a
+     * water surface over ground that was never dug out. A basin shallower than the cut
+     * drains dry rather than inverting.
+     *
+     * <p>Two blocks is as far as this goes cleanly. A deeper cut steps the drainage surface
+     * up at a shore harder than a channel surface can absorb, and water begins standing
+     * above the dry ground beside it: measured at five blocks over at a three-block cut,
+     * against two blocks anywhere in stock terrain.
+     */
+    public static final float DEFAULT_LAKE_INCISE_BLOCKS = 2.0f;
     /** Blocks the waterline wobbles in and out on the largest rivers. */
     public static final float DEFAULT_EDGE_WOBBLE_BLOCKS = 5.0f;
     /** Blocks of coherent relief on river and lake floors. */
@@ -80,7 +102,7 @@ public final class RiverParameters {
             DEFAULT_MAIN_CHANNEL_CELLS, DEFAULT_HEADWATER_CELLS, DEFAULT_WIDTH_REFERENCE_CELLS,
             DEFAULT_MAX_WIDTH_BLOCKS, DEFAULT_MAX_DEPTH_BLOCKS,
             DEFAULT_WIDTH_EXPONENT, DEFAULT_FREEBOARD_BLOCKS,
-            DEFAULT_LAKE_MIN_CELLS, DEFAULT_LAKE_DEPTH_BLOCKS,
+            DEFAULT_LAKE_MIN_CELLS, DEFAULT_LAKE_DEPTH_BLOCKS, DEFAULT_LAKE_INCISE_BLOCKS,
             DEFAULT_EDGE_WOBBLE_BLOCKS, DEFAULT_BED_RELIEF_BLOCKS);
 
     public final int mainChannelCells;
@@ -92,13 +114,14 @@ public final class RiverParameters {
     public final float freeboardBlocks;
     public final int lakeMinCells;
     public final float lakeDepthBlocks;
+    public final float lakeInciseBlocks;
     public final float edgeWobbleBlocks;
     public final float bedReliefBlocks;
 
     public RiverParameters(int mainChannelCells, int headwaterCells, int widthReferenceCells,
                            int maxWidthBlocks, int maxDepthBlocks,
                            float widthExponent, float freeboardBlocks,
-                           int lakeMinCells, float lakeDepthBlocks,
+                           int lakeMinCells, float lakeDepthBlocks, float lakeInciseBlocks,
                            float edgeWobbleBlocks, float bedReliefBlocks) {
         // Headroom above the default, so a world can still be made drier than stock.
         this.mainChannelCells = clamp(mainChannelCells, 1000, 2_000_000);
@@ -110,6 +133,7 @@ public final class RiverParameters {
         this.freeboardBlocks = clamp(freeboardBlocks, 0.5f, 3f);
         this.lakeMinCells = clamp(lakeMinCells, 50, 10_000);
         this.lakeDepthBlocks = clamp(lakeDepthBlocks, 1f, 8f);
+        this.lakeInciseBlocks = clamp(lakeInciseBlocks, 0.25f, 8f);
         this.edgeWobbleBlocks = clamp(edgeWobbleBlocks, 0f, 12f);
         this.bedReliefBlocks = clamp(bedReliefBlocks, 0f, 4f);
     }

@@ -1,5 +1,6 @@
 package com.github.xandergos.terraindiffusionmc.pipeline.river;
 
+import com.github.xandergos.terraindiffusionmc.pipeline.WorldPipelineModelConfig;
 import com.github.xandergos.terraindiffusionmc.world.RiverParameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -256,10 +257,13 @@ public final class RiverRegions {
         float[] temperature = (climate != null && climate.length >= n)
                 ? java.util.Arrays.copyOfRange(climate, 0, n) : null;
 
-        // Depth is deliberately not a lake gate: basins on this terrain run only metres
-        // deep, so lakes are made by area and the bed is deepened at carve time.
-        CoarseHydrology.Drainage d =
-                CoarseHydrology.analyse(elev, precip, h, w, params.lakeMinCells);
+        // Two dials answering different questions: area decides which hollows become lakes,
+        // the outlet cut decides how far the water in one spreads. The cut is given in blocks
+        // because that is what a player reads, while the terrain is in metres.
+        float metresPerBlock = WorldPipelineModelConfig.nativeResolution() / scale;
+        CoarseHydrology.Drainage d = CoarseHydrology.analyse(elev, precip, h, w,
+                params.lakeMinCells, CoarseHydrology.lakeBedDepthM(),
+                params.lakeInciseBlocks * metresPerBlock);
 
         boolean hasLand = false;
         for (int i = 0; i < n && !hasLand; i++) hasLand = !d.ocean[i];
@@ -326,7 +330,7 @@ public final class RiverRegions {
             int row = i / w, col = i - row * w;
             lakeX[out] = (j0 + col) * scale;
             lakeZ[out] = (i0 + row) * scale;
-            lakeSurface[out] = d.filled[i];
+            lakeSurface[out] = d.ponded[i];
             lakeGround[out] = elev[i];
             out++;
         }
@@ -382,7 +386,7 @@ public final class RiverRegions {
                 int bx = (j0 + col) * scale;
                 int bz = (i0 + row) * scale;
                 float flow = d.discharge[cur] / safeNorm;
-                float ground = d.filled[cur];
+                float ground = d.ponded[cur];
                 boolean wet = d.lake[cur];
 
                 if (prevX == Integer.MIN_VALUE) {

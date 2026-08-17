@@ -934,6 +934,19 @@ public final class LocalTerrainProvider {
             boxSmooth(pSteep, RIVER_SMOOTH_BLOCKS);
             boxSmooth(pFade, RIVER_SMOOTH_BLOCKS);
 
+            // A river surface may never climb. The drainage elevation behind it usually
+            // descends on its own, but not where a basin's water sits below its rim: there
+            // the surface steps back up at the shore, and a surface that rises stands above
+            // the ground beside it and spills. Carrying the running minimum forward keeps it
+            // descending, and is also what cuts the notch through a basin's rim, since the
+            // bed is carved below whatever the surface is when it crosses.
+            float[] pSurf = new float[len];
+            float falling = Float.MAX_VALUE;
+            for (int k = 0; k < len; k++) {
+                falling = Math.min(falling, path.ground[k] - freeboardMetres);
+                pSurf[k] = Math.max(falling, TIDEWATER_SURFACE_METRES);
+            }
+
             int count = 0;
             for (int k = 0; k < len; k++) {
                 int col = path.blockX[k] - j1;
@@ -961,12 +974,10 @@ public final class LocalTerrainProvider {
                     runSteep[count] = pSteep[k];
                     runFade[count] = pFade[k];
                     // Taken from the drainage analysis rather than from this tile. That
-                    // elevation already descends along the path and is shared by every tile
-                    // the river crosses, so the water surface cannot step at a tile border.
-                    // The tidewater floor keeps low coastal claims above the level where
-                    // they would be discarded as the ocean's.
-                    runSurf[count] = Math.max(path.ground[k] - freeboardMetres,
-                            TIDEWATER_SURFACE_METRES);
+                    // elevation is shared by every tile the river crosses, so the water
+                    // surface cannot step at a tile border, and the running minimum above is
+                    // computed over the whole path for the same reason.
+                    runSurf[count] = pSurf[k];
                     count++;
                 } else if (count > 0) {
                     // A path may leave and re-enter, so carve each run as it closes.

@@ -75,6 +75,8 @@ public final class WorldScaleSettingsState extends SavedData {
                         .forGetter(p -> p.lakeMinCells),
                 Codec.FLOAT.optionalFieldOf("lake_depth", RiverParameters.DEFAULT_LAKE_DEPTH_BLOCKS)
                         .forGetter(p -> p.lakeDepthBlocks),
+                Codec.FLOAT.optionalFieldOf("lake_incise", RiverParameters.DEFAULT_LAKE_INCISE_BLOCKS)
+                        .forGetter(p -> p.lakeInciseBlocks),
                 Codec.FLOAT.optionalFieldOf("edge_wobble", RiverParameters.DEFAULT_EDGE_WOBBLE_BLOCKS)
                         .forGetter(p -> p.edgeWobbleBlocks),
                 Codec.FLOAT.optionalFieldOf("bed_relief", RiverParameters.DEFAULT_BED_RELIEF_BLOCKS)

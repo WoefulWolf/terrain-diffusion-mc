@@ -27,7 +27,13 @@ public final class CoarseHydrology {
      */
     private static final float FLAT_EPSILON = 1e-4f;
 
-    /** A cell counts as lake bed once the fill raised it this far above the real surface. */
+    /**
+     * A cell counts as lake bed once the fill raised it this far above the real surface.
+     *
+     * <p>Deliberately tiny: any cell the fill raised at all is water, and must be, or a
+     * surface gets laid over ground that was never excavated. Basin size is controlled by
+     * lowering the water instead — see {@link #incise}.
+     */
     private static final float LAKE_MIN_DEPTH_M = 1.0f;
 
 
@@ -38,8 +44,18 @@ public final class CoarseHydrology {
     public static final class Drainage {
         public final int height;
         public final int width;
-        /** Depression-filled elevation in metres. */
+        /**
+         * Depression-filled elevation in metres. This is the ROUTING surface: the fill
+         * exists so every cell has a downhill neighbour, and lowering it puts the pits back
+         * and strands the flow that would have become rivers.
+         */
         public final float[] filled;
+        /**
+         * Where water actually stands, in metres, once each basin's outlet cut is taken off
+         * its spill. Equal to {@link #filled} wherever the fill raised nothing, so callers
+         * that want a water surface can use this everywhere.
+         */
+        public final float[] ponded;
         /** Index of the downstream neighbour, or -1 for ocean and outlets. */
         public final int[] downstream;
         /** Precipitation-weighted upstream accumulation. */
@@ -59,12 +75,13 @@ public final class CoarseHydrology {
         /** Discharge at this cell's basin outlet, i.e. everything that basin carries. */
         public final float[] basinOutflow;
 
-        Drainage(int height, int width, float[] filled, int[] downstream, float[] discharge,
-                 boolean[] ocean, boolean[] lake, boolean[] edgeFed,
+        Drainage(int height, int width, float[] filled, float[] ponded, int[] downstream,
+                 float[] discharge, boolean[] ocean, boolean[] lake, boolean[] edgeFed,
                  int[] basin, float[] basinOutflow) {
             this.height = height;
             this.width = width;
             this.filled = filled;
+            this.ponded = ponded;
             this.downstream = downstream;
             this.discharge = discharge;
             this.ocean = ocean;
@@ -108,6 +125,22 @@ public final class CoarseHydrology {
      */
     public static Drainage analyse(float[] elev, float[] precip, int height, int width,
                                    int minLakeCells, float minLakeDepth) {
+        return analyse(elev, precip, height, width, minLakeCells, minLakeDepth, 0f);
+    }
+
+    /** The depth gate callers pass when they intend every raised cell to hold water. */
+    public static float lakeBedDepthM() {
+        return LAKE_MIN_DEPTH_M;
+    }
+
+    /**
+     * @param inciseMetres metres a basin's outlet has cut down through its rim, which is how
+     *                     far the water sits below the level that would brim it. Left at
+     *                     zero every basin fills to its spill contour and is as wide as the
+     *                     terrain allows.
+     */
+    public static Drainage analyse(float[] elev, float[] precip, int height, int width,
+                                   int minLakeCells, float minLakeDepth, float inciseMetres) {
         int n = height * width;
         boolean[] ocean = new boolean[n];
         for (int i = 0; i < n; i++) {
@@ -115,10 +148,11 @@ public final class CoarseHydrology {
         }
 
         float[] filled = fillDepressions(elev, ocean, height, width);
+        float[] ponded = incise(elev, filled, ocean, n, inciseMetres);
 
         boolean[] lake = new boolean[n];
         for (int i = 0; i < n; i++) {
-            lake[i] = !ocean[i] && filled[i] - elev[i] >= minLakeDepth;
+            lake[i] = !ocean[i] && ponded[i] - elev[i] >= minLakeDepth;
         }
         if (minLakeCells > 1) dropSmallPonds(lake, height, width, minLakeCells);
 
@@ -135,7 +169,7 @@ public final class CoarseHydrology {
             if (basin[i] >= 0) basinOutflow[i] = discharge[basin[i]];
         }
 
-        return new Drainage(height, width, filled, downstream, discharge, ocean, lake,
+        return new Drainage(height, width, filled, ponded, downstream, discharge, ocean, lake,
                 edgeFed, basin, basinOutflow);
     }
 
@@ -225,6 +259,39 @@ public final class CoarseHydrology {
             if (filled[i] == Float.MAX_VALUE) filled[i] = safeElev(elev[i]);
         }
         return filled;
+    }
+
+    /**
+     * Drops every basin's water by {@code inciseMetres}, as an outlet stream that has cut
+     * down through the rim would.
+     *
+     * <p>Needs no basin finding, because the fill already recorded one: a raised cell's
+     * filled value IS the spill level of whatever depression it sits in, so subtracting from
+     * it lowers that whole basin by construction, and every basin by its own reckoning.
+     * Bounded below by the real ground, so a hollow shallower than the cut simply drains dry
+     * rather than inverting.
+     *
+     * <p>Lowering the surface rather than refusing the basin is what keeps this honest. The
+     * cells left above the new level go back to being ordinary ground — filled equals
+     * elevation there, so nothing downstream can mistake them for water and lay a surface
+     * over ground that was never dug out. Basins get smaller because their shoreline is a
+     * contour and the contour has moved down, not because they were struck off.
+     *
+     * <p>What remains is a pond sitting below its rim with no way out. That is left to the
+     * sink repair, which breaches rather than refills, and to the channel carve, whose bed
+     * cuts the notch through the rim in the world itself.
+     */
+    private static float[] incise(float[] elev, float[] filled, boolean[] ocean, int n,
+                                  float inciseMetres) {
+        float[] ponded = filled.clone();
+        if (inciseMetres <= 0f) return ponded;
+        for (int i = 0; i < n; i++) {
+            if (ocean[i]) continue;
+            float ground = safeElev(elev[i]);
+            if (filled[i] <= ground) continue;
+            ponded[i] = Math.max(ground, filled[i] - inciseMetres);
+        }
+        return ponded;
     }
 
     /** Clears connected groups of lake cells smaller than {@code minCells}. */

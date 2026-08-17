@@ -148,9 +148,9 @@ public final class WorldScaleSettingsScreen extends Screen {
         riverLakeInciseField = addLabeledField(right, centerY + 112, "Outlet cut",
                 String.valueOf(p.lakeInciseBlocks),
                 "How far a basin's outlet has cut down through its rim, in blocks. Higher: "
-                        + "lakes sit lower and cover less ground, though past about two "
-                        + "blocks the water begins standing above its shore. Lower: "
-                        + "basins brim to their rim and flood every margin.");
+                        + "lakes sit lower and cover less ground, but past one block some "
+                        + "rivers end in open country. Lower: basins brim to their "
+                        + "rim and flood every margin.");
 
         addCenteredTextWidget(CAVE_LABEL_TEXT, cavesCenter, centerY - 82, 0xFFFFFF);
 

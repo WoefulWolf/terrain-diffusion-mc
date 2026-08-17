@@ -60,13 +60,18 @@ public final class RiverParameters {
     /**
      * Smallest basin, in native cells, that fills as a lake instead of being carved through.
      *
-     * <p>Set high so lakes are landmarks rather than scenery. This governs how MANY lakes
-     * there are and almost nothing else: raising it leaves the large basins untouched and
-     * clears out the small ones, so the count falls sharply while the water covered barely
-     * moves — the big basins hold nearly all of it. Requiring a deeper flood instead does
-     * not work, because the basins this terrain makes are deep as well as broad.
+     * <p>Thins the lake COUNT, leaving the large basins untouched and clearing out the small
+     * ones. What it costs is not obvious: a basin it rejects still had its ground raised by
+     * the depression fill, and that flat is then neither lake nor slope, so a channel
+     * crossing it has no gradient to follow and rules itself over in straight lines.
+     *
+     * <p>Sits where both faults are at their floor, which is not at either end. Raised to
+     * 6000 the water left standing on dry ground doubles, as more basins are rejected into
+     * flats. Dropped to 250 those flats go, but rivers start ending in open country instead:
+     * the lakes that remain are small enough that the routes kept for their outlets run out
+     * on land rather than arriving anywhere.
      */
-    public static final int DEFAULT_LAKE_MIN_CELLS = 6_000;
+    public static final int DEFAULT_LAKE_MIN_CELLS = 1_500;
     /**
      * Blocks of water a lake reaches where its basin is deep enough to earn it. The bed
      * tapers up to its shore rather than holding this everywhere, so this is the middle
@@ -77,22 +82,21 @@ public final class RiverParameters {
      * Blocks a basin's outlet has cut down through its rim, and so how far below the level
      * that would brim it the water sits.
      *
-     * <p>The only dial that reaches how LARGE a basin is. A lake's shoreline is a contour of
-     * the terrain, so the one way to pull it in is to move the contour down; the size floor
-     * decides which hollows fill, never how far the water then spreads once one does.
+     * <p>The one dial that reaches how LARGE a basin is: a lake's shoreline is a contour of
+     * the terrain, so the only way to pull it in is to move the contour down. The size floor
+     * decides which hollows fill, never how far the water spreads once one does.
      *
-     * <p>Lowering the water is what makes this safe, where refusing the basin outright was
-     * not. Every cell the fill still raises is a lake, excavated and given a bed, while the
-     * cells left above the new level go back to being ordinary ground, so nothing can lay a
-     * water surface over ground that was never dug out. A basin shallower than the cut
-     * drains dry rather than inverting.
+     * <p>Left at its minimum, which is to say off. Every step of cut drains more basins past
+     * lake status, and a basin dropped from the mask keeps the raised ground the fill gave
+     * it — so the same flat that a rejected basin leaves behind appears here too, with water
+     * lying on it and channels ruled straight across. One block of cut trebled the water
+     * standing on dry land at a measured spot, and two blocks left a wide river ending in
+     * open country once in every hundred channels.
      *
-     * <p>Two blocks is as far as this goes cleanly. A deeper cut steps the drainage surface
-     * up at a shore harder than a channel surface can absorb, and water begins standing
-     * above the dry ground beside it: measured at five blocks over at a three-block cut,
-     * against two blocks anywhere in stock terrain.
+     * <p>The dial is sound and stays exposed; what it needs is for a filled flat to be
+     * survivable, at which point basin size becomes reachable again.
      */
-    public static final float DEFAULT_LAKE_INCISE_BLOCKS = 2.0f;
+    public static final float DEFAULT_LAKE_INCISE_BLOCKS = 0.25f;
     /** Blocks the waterline wobbles in and out on the largest rivers. */
     public static final float DEFAULT_EDGE_WOBBLE_BLOCKS = 5.0f;
     /** Blocks of coherent relief on river and lake floors. */

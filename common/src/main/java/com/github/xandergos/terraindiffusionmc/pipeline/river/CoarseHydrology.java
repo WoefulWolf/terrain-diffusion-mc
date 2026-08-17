@@ -156,6 +156,16 @@ public final class CoarseHydrology {
         }
         if (minLakeCells > 1) dropSmallPonds(lake, height, width, minLakeCells);
 
+        // Whatever the culling above rejected is not water, so its surface comes back down
+        // to the ground. The fill raised it and the routing still needs that, but nothing
+        // downstream may keep treating it as standing water: a surface left raised over
+        // ground that was never excavated puts water on dry land, and a channel crossing a
+        // filled flat has no gradient to follow, so it rules itself across in straight
+        // lines. Both are the same fault, and both are visible from the air.
+        for (int i = 0; i < n; i++) {
+            if (!lake[i]) ponded[i] = safeElev(elev[i]);
+        }
+
         resolveFlats(filled, ocean, height, width);
 
         int[] downstream = routeD8(filled, ocean, height, width);

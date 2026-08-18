@@ -4,6 +4,8 @@
   "terrain-diffusion-mc.world_settings.open_button": "Terrain Settings",
   "terrain-diffusion-mc.world_settings.scale": "World Scale",
   "terrain-diffusion-mc.world_settings.world_scale_description": "Set World Scale for this world.",
-  "terrain-diffusion-mc.world_settings.scale_error": "Scale must be an integer >= 1"
+  "terrain-diffusion-mc.world_settings.scale_error": "Scale must be an integer >= 1",
+  "biome.terrain-diffusion-mc.forest_sparse": "Sparse Forest",
+  "biome.terrain-diffusion-mc.taiga_sparse": "Sparse Taiga",
+  "biome.terrain-diffusion-mc.snowy_taiga_sparse": "Sparse Snowy Taiga"
 }
-

@@ -42,6 +42,45 @@ public final class RiverCarver {
     private static final float MOUTH_WET_RELAX_BLOCKS = 3f;
 
     /**
+     * Natural levee. The bank ease can only cut ground away, so where the country beside a
+     * channel already lies below the waterline there is nothing for it to ease and the
+     * water simply ends at a bare face, perched over the ground next to it. A crest is
+     * carried outward instead, falling away from the channel — which is what a real river
+     * builds for itself out of what it drops on its own banks.
+     *
+     * <p>Self-limiting: it only ever raises ground that lies under the line it draws, so a
+     * channel running through country at or above its own waterline gets nothing at all,
+     * and the wall is exactly as tall as the drop it has to close.
+     */
+    public static final float LEVEE_CREST_BLOCKS = 0.25f;
+    /** Blocks of fall per block outward, so a tall levee is a broad one rather than a wall. */
+    private static final float LEVEE_SLOPE = 1f;
+    private static final float LEVEE_REACH_BLOCKS = 12f;
+    /** Wobble on the outer face only; the crest holds the water and may not be cut into. */
+    private static final float LEVEE_WOBBLE = 0.35f;
+    /**
+     * Below this surface the mouth is the sea's, and a bank there would dam the river off
+     * from it.
+     */
+    private static final float LEVEE_MIN_SURFACE_BLOCKS = 3f;
+    /**
+     * How much of a channel has to be left before it is worth banking. A taper on its way
+     * to nothing carries no water to hold, and a full crest around one would be a berm
+     * with no river in it; a channel merely thinning as it nears a lake still does.
+     */
+    private static final float LEVEE_MIN_FADE = 0.35f;
+
+    /** How far a crest is carried out from the waterline, for callers banking lake shores. */
+    public static float leveeReachBlocks() {
+        return LEVEE_REACH_BLOCKS;
+    }
+
+    /** Fall per block out from the crest, in metres. */
+    public static float leveeSlopeMetres(float metresPerBlock) {
+        return LEVEE_SLOPE * metresPerBlock;
+    }
+
+    /**
      * Below this mean temperature a river freezes over completely: ice bank to bank,
      * steps and falls solid, instead of the bank-inward margin milder cold gets. Rivers
      * with real current keep an open channel well under zero; only severe subarctic
@@ -57,13 +96,23 @@ public final class RiverCarver {
     }
 
     /**
+     * How far a path point's water can reach, in blocks from its centre: the cut itself
+     * plus the bank it eases through. Short of {@link #maxReachBlocks}, which also counts
+     * the crest carried beyond the bank and so covers dry ground the channel never wets.
+     */
+    public static float wettedReachBlocks(float halfWidth, float edgeWobbleMax) {
+        return halfWidth + MAX_BANK_CELLS + edgeWobbleMax;
+    }
+
+    /**
      * Widest possible footprint of a path point, in blocks from its centre. Callers
      * collecting path points near a tile must extend their margin this far, or a channel
      * running just outside the border leaves its overhanging rim uncarved in the tile
      * that owns those blocks.
      */
     public static int maxReachBlocks(float maxHalfWidth, float edgeWobbleMax) {
-        return (int) Math.ceil(maxHalfWidth + MAX_BANK_CELLS + edgeWobbleMax);
+        return (int) Math.ceil(maxHalfWidth + MAX_BANK_CELLS + edgeWobbleMax
+                + LEVEE_REACH_BLOCKS);
     }
 
     /**
@@ -126,7 +175,12 @@ public final class RiverCarver {
             float bank = Math.max(1f, Math.min(MAX_BANK_CELLS, (depth + freeboard) / BANK_SLOPE));
             float wobbleAmp = edgeWobble == null ? 0f
                     : Math.min(1f, radius / EDGE_WOBBLE_FULL_RADIUS) * edgeWobbleMax;
-            int reach = (int) Math.ceil(radius + bank + wobbleAmp);
+            // A tapering mouth or source is on its way to nothing and has no bank to give,
+            // and near sea level the far side of the waterline is the ocean.
+            boolean levee = fade >= LEVEE_MIN_FADE
+                    && surface >= LEVEE_MIN_SURFACE_BLOCKS * metresPerBlock;
+            int reach = (int) Math.ceil(radius + bank + wobbleAmp
+                    + (levee ? LEVEE_REACH_BLOCKS : 0f));
 
             int r0 = pathRow[step];
             int c0 = pathCol[step];
@@ -144,7 +198,12 @@ public final class RiverCarver {
                     int idx = r * width + c;
                     float dist = (float) Math.sqrt(dr * dr + dc * dc);
                     if (wobbleAmp > 0f) dist -= edgeWobble[idx] * wobbleAmp;
-                    if (dist > radius + bank) continue;
+                    if (dist > radius + bank) {
+                        if (levee) raiseLevee(elev, waterLevel, idx,
+                                dist - (radius + bank), surface, metresPerBlock,
+                                edgeWobble == null ? 0f : edgeWobble[idx]);
+                        continue;
+                    }
                     float target;
                     if (dist <= radius) {
                         target = bed;
@@ -188,6 +247,22 @@ public final class RiverCarver {
                 }
             }
         }
+    }
+
+    /**
+     * One cell of the outward crest. The fall is measured from the outer edge of the bank,
+     * and the wobble scales with that distance so the face varies while the lip that holds
+     * the water stays where it was put.
+     */
+    private static void raiseLevee(float[] elev, float[] waterLevel, int idx, float beyond,
+                                   float surface, float metresPerBlock, float wobble) {
+        float out = beyond * (1f + LEVEE_WOBBLE * wobble);
+        if (out > LEVEE_REACH_BLOCKS) return;
+        // Never under water already placed: raising a bed that something has been laid on
+        // top of is how water ends up standing on ground that was never dug out.
+        if (waterLevel != null && waterLevel[idx] != Float.NEGATIVE_INFINITY) return;
+        float target = surface + (LEVEE_CREST_BLOCKS - out * LEVEE_SLOPE) * metresPerBlock;
+        if (target > elev[idx]) elev[idx] = target;
     }
 
     private static float clamp01(float v) {

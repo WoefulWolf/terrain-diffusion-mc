@@ -1,11 +1,13 @@
 package com.github.xandergos.terraindiffusionmc.pipeline.river;
 
+import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider;
 import com.github.xandergos.terraindiffusionmc.pipeline.WorldPipelineModelConfig;
 import com.github.xandergos.terraindiffusionmc.world.RiverParameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -113,18 +115,28 @@ public final class RiverRegions {
          * pan at the waterline.
          */
         public final float[] lakeGround;
+        /**
+         * Level each lake cell's basin drains to, once the channels reaching it are taken
+         * into account, or positive infinity where none does. Held apart from
+         * {@link #lakeSurface} because the two reconcile in opposite directions across
+         * regions: a clipped window can only make a basin brim LOWER than the truth, so
+         * spills take the highest claim, while a channel is positive evidence of an outlet,
+         * so drains take the lowest.
+         */
+        public final float[] lakeDrain;
 
         Region(List<RiverPath> paths, int[] lakeBlockX, int[] lakeBlockZ,
-               float[] lakeSurface, float[] lakeGround) {
+               float[] lakeSurface, float[] lakeGround, float[] lakeDrain) {
             this.paths = paths;
             this.lakeBlockX = lakeBlockX;
             this.lakeBlockZ = lakeBlockZ;
             this.lakeSurface = lakeSurface;
             this.lakeGround = lakeGround;
+            this.lakeDrain = lakeDrain;
         }
 
         static final Region EMPTY = new Region(List.of(), new int[0], new int[0],
-                new float[0], new float[0]);
+                new float[0], new float[0], new float[0]);
     }
 
     /** A channel as a run of block positions, ordered downstream. */
@@ -319,10 +331,13 @@ public final class RiverRegions {
         for (int i = 0; i < n; i++) {
             if (d.lake[i]) lakeCount++;
         }
+        float[] drain = basinDrain(d, paths, params, h, w, i0, j0, scale);
+
         int[] lakeX = new int[lakeCount];
         int[] lakeZ = new int[lakeCount];
         float[] lakeSurface = new float[lakeCount];
         float[] lakeGround = new float[lakeCount];
+        float[] lakeDrain = new float[lakeCount];
         int out = 0;
         for (int i = 0; i < n; i++) {
             if (!d.lake[i]) continue;
@@ -331,10 +346,134 @@ public final class RiverRegions {
             lakeZ[out] = (i0 + row) * scale;
             lakeSurface[out] = d.ponded[i];
             lakeGround[out] = elev[i];
+            lakeDrain[out] = drain[i];
             out++;
         }
 
-        return new Region(paths, lakeX, lakeZ, lakeSurface, lakeGround);
+        return new Region(paths, lakeX, lakeZ, lakeSurface, lakeGround, lakeDrain);
+    }
+
+    /**
+     * How far a channel must run below a basin before the basin is taken to drain into it,
+     * as a fraction of a native cell's height in metres. Small descents are what an outlet
+     * does on its way out of a lake, and pulling the lake down after them would shave a
+     * block off every basin in the world.
+     */
+    private static final float DRAIN_MIN_STEP_M = 12f;
+    /** Widest a slack reach spreads, mirroring the carve's own slack-to-steep range. */
+    private static final float WIDTH_WHEN_SLACK = 1.35f;
+
+    /**
+     * The level each basin drains to, once the channels running past it are known.
+     *
+     * <p>A hollow is filled by the depression pass against the terrain as the model
+     * produced it — before any channel is cut. So a basin lying beside a river is filled to
+     * its own rim even though the river, once carved, runs below it: nothing has told the
+     * fill that an outlet is about to appear. What the player then sees is standing water a
+     * couple of blocks above the river beside it, with no bank between, because a wide
+     * channel reaches under the basin's edge.
+     *
+     * <p>Resolved by draining the basin to the lowest channel that reaches it. Done here,
+     * per basin, where the whole hollow is in view — one level for the whole of it, so it
+     * stays a single flat sheet. A tile sees only a piece of a basin and neighbouring tiles
+     * would settle on different levels, which is the terracing this pass exists to avoid.
+     */
+    private static float[] basinDrain(CoarseHydrology.Drainage d, List<RiverPath> paths,
+                                      RiverParameters params,
+                                      int h, int w, int i0, int j0, int scale) {
+        int n = h * w;
+        float[] drain = new float[n];
+        Arrays.fill(drain, Float.POSITIVE_INFINITY);
+        if (paths.isEmpty()) return drain;
+
+        // Label the basins, so a channel touching one edge lowers the whole sheet.
+        int[] label = new int[n];
+        Arrays.fill(label, -1);
+        int basins = 0;
+        int[] stack = new int[Math.max(64, n / 16)];
+        for (int start = 0; start < n; start++) {
+            if (!d.lake[start] || label[start] >= 0) continue;
+            int top = 0;
+            stack[top++] = start;
+            label[start] = basins;
+            while (top > 0) {
+                int cur = stack[--top];
+                int r = cur / w, c = cur - r * w;
+                for (int dr = -1; dr <= 1; dr++) {
+                    for (int dc = -1; dc <= 1; dc++) {
+                        int nr = r + dr, nc = c + dc;
+                        if (nr < 0 || nr >= h || nc < 0 || nc >= w) continue;
+                        int ni = nr * w + nc;
+                        if (!d.lake[ni] || label[ni] >= 0) continue;
+                        label[ni] = basins;
+                        if (top == stack.length) stack = Arrays.copyOf(stack, top * 2);
+                        stack[top++] = ni;
+                    }
+                }
+            }
+            basins++;
+        }
+        if (basins == 0) return drain;
+
+        float[] lowest = new float[basins];
+        Arrays.fill(lowest, Float.POSITIVE_INFINITY);
+        // A path that has gone under a basin is that basin's outflow, and what it does
+        // downstream is the basin draining, not evidence of somewhere lower to drain to.
+        // Counting it hauls the lake down after its own outlet — five blocks on a measured
+        // specimen. Marked per path, so the same river still drains any OTHER basin it
+        // later runs past.
+        int[] outflowOf = new int[basins];
+        Arrays.fill(outflowOf, -1);
+        int pathIndex = 0;
+
+        for (RiverPath path : paths) {
+            // Same descending profile the carve lays its water on, so the level a basin
+            // drops to is the one the channel beside it will actually be at.
+            float falling = Float.MAX_VALUE;
+            pathIndex++;
+            for (int k = 0; k < path.blockX.length; k++) {
+                falling = Math.min(falling, path.ground[k]);
+
+                int pr = Math.floorDiv(path.blockZ[k], scale) - i0;
+                int pc = Math.floorDiv(path.blockX[k], scale) - j0;
+                if (path.submerged[k]) {
+                    if (pr >= 0 && pr < h && pc >= 0 && pc < w && label[pr * w + pc] >= 0) {
+                        outflowOf[label[pr * w + pc]] = pathIndex;
+                    }
+                    continue;
+                }
+
+                int cellRow = pr, cellCol = pc;
+                // Everything the channel's water can cover: the base half-width, the
+                // widening a slack reach gets, and the bank it eases through. Measured
+                // short leaves the basins whose edge a river only just touches undrained,
+                // which is most of them — the two are passing close, not overlapping.
+                float half = WIDTH_WHEN_SLACK
+                        * LocalTerrainProvider.baseRiverHalfWidthBlocks(path.flow[k]);
+                int reach = (int) Math.ceil(
+                        RiverCarver.wettedReachBlocks(half, params.edgeWobbleBlocks) / scale);
+                for (int dr = -reach; dr <= reach; dr++) {
+                    int r = cellRow + dr;
+                    if (r < 0 || r >= h) continue;
+                    for (int dc = -reach; dc <= reach; dc++) {
+                        int c = cellCol + dc;
+                        if (c < 0 || c >= w) continue;
+                        if (dr * dr + dc * dc > reach * reach) continue;
+                        int b = label[r * w + c];
+                        if (b < 0 || outflowOf[b] == pathIndex) continue;
+                        if (falling < lowest[b]) lowest[b] = falling;
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < n; i++) {
+            int b = label[i];
+            if (b < 0) continue;
+            float low = lowest[b];
+            if (low < d.ponded[i] - DRAIN_MIN_STEP_M) drain[i] = low;
+        }
+        return drain;
     }
 
     /**

@@ -788,6 +788,11 @@ public final class LocalTerrainProvider {
             return;
         }
 
+        // A channel centred just outside the tile still hangs its rim into it, so path
+        // points are kept within the widest possible footprint of the border. The fan
+        // at an ocean mouth can double the half-width, hence the 2.
+        int carveMargin = RiverCarver.maxReachBlocks(maxHalfWidth * 2f, params.edgeWobbleBlocks);
+
         int[] localRow = new int[Math.max(16, height * 2)];
         int[] localCol = new int[localRow.length];
         float[] runHalf = new float[localRow.length];
@@ -795,11 +800,6 @@ public final class LocalTerrainProvider {
         float[] runSurf = new float[localRow.length];
         float[] runSteep = new float[localRow.length];
         float[] runFade = new float[localRow.length];
-
-        // A channel centred just outside the tile still hangs its rim into it, so path
-        // points are kept within the widest possible footprint of the border. The fan
-        // at an ocean mouth can double the half-width, hence the 2.
-        int carveMargin = RiverCarver.maxReachBlocks(maxHalfWidth * 2f, params.edgeWobbleBlocks);
 
         float[] edgeField = new float[height * width];
         for (int row = 0; row < height; row++) {
@@ -813,8 +813,8 @@ public final class LocalTerrainProvider {
         // mouth size. A tributary reaching a bigger river finds those cells already wet
         // at the lower surface, so its own water stops at the join and steps down like a
         // little waterfall, instead of riding out over the river on its higher surface.
-        stampLakes(regions, elev, biomeFlat, waterFlat, riverClassFlat, temperature,
-                i1, j1, height, width,
+        LakeGrid lakes = stampLakes(regions, elev, biomeFlat, waterFlat, riverClassFlat,
+                temperature, i1, j1, height, width,
                 metresPerBlock, freeboardMetres, params.lakeDepthBlocks, scale);
         // Before the rivers, so a channel crossing a fringe stamps itself back on top.
         stampLakeFringes(regions, elev, biomeFlat, climate, waterFlat, i1, j1, height, width,
@@ -1000,8 +1000,11 @@ public final class LocalTerrainProvider {
                     i1, j1, height, width, metresPerBlock);
         }
 
+        bankLakeShores(elev, waterFlat, lakes, i1, j1, height, width, metresPerBlock);
+
         featherBeds(elev, waterFlat, i1, j1, height, width, metresPerBlock,
                 params.bedReliefBlocks);
+
     }
 
     /**
@@ -1020,7 +1023,7 @@ public final class LocalTerrainProvider {
      * sooner, so every claim is a lower bound on the true spill, and the highest of them is
      * the one that saw most of the basin.
      */
-    private static void stampLakes(List<RiverRegions.Region> regions, float[] elev,
+    private static LakeGrid stampLakes(List<RiverRegions.Region> regions, float[] elev,
                                    short[] biomeFlat, float[] waterFlat, byte[] riverClassFlat,
                                    float[] temperature,
                                    int i1, int j1, int height, int width,
@@ -1030,7 +1033,11 @@ public final class LocalTerrainProvider {
         // is padded rather than clipped to the tile edge. Cell coordinates come off the same
         // global native grid in every region, so one shared cell lands on one slot whichever
         // region contributed it.
-        int pad = 2;
+        //
+        // Wide enough for the bank passes to reach in as well: they raise ground around a
+        // shore, and a tile that could not see a shore just outside itself would leave a
+        // notch in the bank exactly on its own border.
+        int pad = 2 + (int) Math.ceil(RiverCarver.leveeReachBlocks() / scale);
         int cz0 = Math.floorDiv(i1, scale) - pad;
         int cz1 = Math.floorDiv(i1 + height - 1, scale) + pad;
         int cx0 = Math.floorDiv(j1, scale) - pad;
@@ -1039,7 +1046,9 @@ public final class LocalTerrainProvider {
         float[] cellLevel = new float[ch * cw];
         float[] cellSpill = new float[ch * cw];
         float[] cellGround = new float[ch * cw];
+        float[] cellDrain = new float[ch * cw];
         Arrays.fill(cellSpill, Float.NEGATIVE_INFINITY);
+        Arrays.fill(cellDrain, Float.POSITIVE_INFINITY);
 
         for (RiverRegions.Region region : regions) {
             for (int k = 0; k < region.lakeSurface.length; k++) {
@@ -1051,6 +1060,9 @@ public final class LocalTerrainProvider {
                     cellSpill[ci] = region.lakeSurface[k];
                     cellGround[ci] = region.lakeGround[k];
                 }
+                // Lowest wins here, unlike the spill: a region reporting a channel has
+                // found an outlet, while one reporting none has merely not looked there.
+                if (region.lakeDrain[k] < cellDrain[ci]) cellDrain[ci] = region.lakeDrain[k];
             }
         }
 
@@ -1060,7 +1072,7 @@ public final class LocalTerrainProvider {
                 cellLevel[ci] = Float.NEGATIVE_INFINITY;
                 continue;
             }
-            float level = spill - freeboardMetres;
+            float level = Math.min(spill, cellDrain[ci]) - freeboardMetres;
             // A coastal basin can sit lower than a full freeboard above the sea. Tuck the
             // water just below its rim rather than leaving a dry pan.
             if (level <= 0f) level = spill - 0.35f * metresPerBlock;
@@ -1142,6 +1154,92 @@ public final class LocalTerrainProvider {
                         if (elev[idx] <= level || elev[idx] > level + 1.4f * metresPerBlock) continue;
                         float n = SHORE_EXIT_NOISE.GetNoise(blockX + dx, blockZ + dz);
                         if (n > SHORE_EXIT_NOISE_MIN) elev[idx] = level + 0.05f * metresPerBlock;
+                    }
+                }
+            }
+        }
+
+        return new LakeGrid(cellLevel, cx0, cz0, cw, ch, scale);
+    }
+
+    /**
+     * The reconciled water level of every basin near a tile, one entry per native cell.
+     *
+     * <p>Kept in cell space and padded past the tile because the passes that read it walk
+     * outward from a shoreline: driving them off whatever happens to be inside a tile makes
+     * the answer depend on where the tile edge fell, and two tiles then disagree about the
+     * same block.
+     */
+    private record LakeGrid(float[] level, int cx0, int cz0, int cw, int ch, int scale) {
+        /** Level of the basin covering a block, or negative infinity where there is none. */
+        float at(int blockZ, int blockX) {
+            int cx = Math.floorDiv(blockX, scale) - cx0;
+            int cz = Math.floorDiv(blockZ, scale) - cz0;
+            if (cx < 0 || cx >= cw || cz < 0 || cz >= ch) return Float.NEGATIVE_INFINITY;
+            return level[cz * cw + cx];
+        }
+    }
+
+    /**
+     * The same bank a channel builds for itself, around a basin.
+     *
+     * <p>A basin's mask is decided a whole native cell at a time and only where a region saw
+     * the hollow, so its rim rarely lands on the contour its water stands at. Where the
+     * ground just outside lies below that water there is nothing holding it in, and the lake
+     * ends at a bare face over the country beside it.
+     *
+     * <p>Walked out from the shore rather than from every cell of a basin, since only a rim
+     * can be short of bank, and the crest falls away with distance so a tall one comes out as
+     * a bank rather than a wall.
+     */
+    private static void bankLakeShores(float[] elev, float[] waterFlat, LakeGrid lakes,
+                                       int i1, int j1, int height, int width,
+                                       float metresPerBlock) {
+        if (waterFlat == null) return;
+        float crest = RiverCarver.LEVEE_CREST_BLOCKS * metresPerBlock;
+        float slope = RiverCarver.leveeSlopeMetres(metresPerBlock);
+        int reach = (int) RiverCarver.leveeReachBlocks();
+        int scale = lakes.scale(), cw = lakes.cw(), ch = lakes.ch();
+        float[] level = lakes.level();
+
+        for (int cz = 0; cz < ch; cz++) {
+            for (int cx = 0; cx < cw; cx++) {
+                float here = level[cz * cw + cx];
+                if (here == Float.NEGATIVE_INFINITY) continue;
+
+                boolean shore = false;
+                for (int dz = -1; dz <= 1 && !shore; dz++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int nz = cz + dz, nx = cx + dx;
+                        if (nz < 0 || nz >= ch || nx < 0 || nx >= cw
+                                || level[nz * cw + nx] == Float.NEGATIVE_INFINITY) {
+                            shore = true;
+                            break;
+                        }
+                    }
+                }
+                if (!shore) continue;
+
+                int blockZ = (lakes.cz0() + cz) * scale, blockX = (lakes.cx0() + cx) * scale;
+                for (int dz = -reach; dz < scale + reach; dz++) {
+                    int row = blockZ + dz - i1;
+                    if (row < 0 || row >= height) continue;
+                    for (int dx = -reach; dx < scale + reach; dx++) {
+                        int col = blockX + dx - j1;
+                        if (col < 0 || col >= width) continue;
+                        int idx = row * width + col;
+                        if (waterFlat[idx] != Float.NEGATIVE_INFINITY) continue;
+                        // Measured from the cell's own footprint rather than its corner, so
+                        // a bank does not step where one native cell hands over to the next.
+                        float ez = Math.max(0, Math.max(-dz, dz - (scale - 1)));
+                        float ex = Math.max(0, Math.max(-dx, dx - (scale - 1)));
+                        float dist = (float) Math.sqrt(ez * ez + ex * ex);
+                        // The block against the water is a whole block out from the cell
+                        // that holds it, so the crest has to run to there before it starts
+                        // falling. Without that the first ring lands under the waterline
+                        // and the bank leaks by exactly the height it was meant to hold.
+                        float top = here + crest - Math.max(0f, dist - 1f) * slope;
+                        if (top > elev[idx]) elev[idx] = top;
                     }
                 }
             }

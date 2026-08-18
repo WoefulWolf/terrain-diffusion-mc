@@ -54,6 +54,11 @@ public final class BiomeClassifier {
     // river is decided by where water routes, not by the climate of the cell it crosses.
     public static final short RIVER = 36, FROZEN_RIVER = 37;
 
+    // Standing water, stamped with the lakes for the same reason. Vanilla has no biome
+    // for it — a lake there is whatever the ground around it is — so nothing in it
+    // grows or swims. These carry a river's water life onto a basin.
+    public static final short LAKE = 136, FROZEN_LAKE = 137;
+
     // Stamped by applyShoreline, which needs distance to the ocean and so cannot run
     // inside the per-pixel loop.
     public static final short BEACH = 38, SNOWY_BEACH = 39, STONY_SHORE = 40;
@@ -66,6 +71,26 @@ public final class BiomeClassifier {
     // Stamped by the provider's island pass, which needs the coarse ocean mask and so
     // cannot run from a tile's own window.
     public static final short MUSHROOM_FIELDS = 50;
+
+    /**
+     * The nearest vanilla biome to one this mod adds, for worlds created with additional
+     * biomes switched off.
+     *
+     * <p>Substitution rather than removal: the rules that produce these ids are about the
+     * terrain, not about the biome list, so a thinned-out forest is still a forest and a
+     * filled basin is still fresh water. Dropping the id instead would hand the ground
+     * back to whichever rule happened to catch it next.
+     */
+    public static short vanillaEquivalent(short biome) {
+        switch (biome) {
+            case FOREST_SPARSE:      return FOREST;
+            case TAIGA_SPARSE:       return TAIGA;
+            case SNOWY_TAIGA_SPARSE: return SNOWY_TAIGA;
+            case LAKE:               return RIVER;
+            case FROZEN_LAKE:        return FROZEN_RIVER;
+            default:                 return biome;
+        }
+    }
 
     /**
      * Altitude gates are judged against the high ground around them, not against a fixed

@@ -15,6 +15,7 @@ public final class WorldScaleManager {
     private static volatile RiverParameters currentRiverParameters = RiverParameters.DEFAULT;
     private static volatile CaveParameters currentCaveParameters = CaveParameters.DEFAULT;
     private static volatile LatitudeParameters currentLatitudeParameters = LatitudeParameters.DEFAULT;
+    private static volatile boolean currentAdditionalBiomes = true;
 
     private WorldScaleManager() {
     }
@@ -44,6 +45,8 @@ public final class WorldScaleManager {
             if (pendingCaves != null) worldScaleSettingsState.setCaveParameters(pendingCaves);
             LatitudeParameters pendingLatitude = WorldScaleSelectionState.consumePendingLatitudeParameters();
             if (pendingLatitude != null) worldScaleSettingsState.setLatitudeParameters(pendingLatitude);
+            Boolean pendingBiomes = WorldScaleSelectionState.consumePendingAdditionalBiomes();
+            if (pendingBiomes != null) worldScaleSettingsState.setAdditionalBiomes(pendingBiomes);
         }
 
         currentScale = clampScale(worldScaleSettingsState.getScale());
@@ -51,6 +54,7 @@ public final class WorldScaleManager {
         currentRiverParameters = worldScaleSettingsState.getRiverParameters();
         currentCaveParameters = worldScaleSettingsState.getCaveParameters();
         currentLatitudeParameters = worldScaleSettingsState.getLatitudeParameters();
+        currentAdditionalBiomes = worldScaleSettingsState.hasAdditionalBiomes();
         // Cached regions were analysed under the previous world's parameters.
         com.github.xandergos.terraindiffusionmc.pipeline.river.RiverRegions.clear();
     }
@@ -73,6 +77,17 @@ public final class WorldScaleManager {
     /** Returns the latitude banding parameters active for the loaded world. */
     public static LatitudeParameters getLatitudeParameters() {
         return currentLatitudeParameters;
+    }
+
+    /**
+     * Whether the loaded world places the biomes this mod adds on top of vanilla's list.
+     *
+     * <p>Fixed at creation. The ids are stamped into cached terrain, so flipping it under
+     * a world in progress would leave already-generated chunks disagreeing with new ones
+     * along every border.
+     */
+    public static boolean hasAdditionalBiomes() {
+        return currentAdditionalBiomes;
     }
 
     /** Updates river mode for the currently loaded world and persists it immediately. */

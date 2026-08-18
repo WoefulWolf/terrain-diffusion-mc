@@ -29,7 +29,9 @@ public final class WorldScaleSettingsState extends SavedData {
             // Falls back to OFF, not DEFAULT: a world explored without banding must not
             // grow climate seams when the field is missing from its save.
             LatitudeParametersCodec.CODEC.optionalFieldOf("latitude_parameters", LatitudeParameters.OFF)
-                    .forGetter(state -> state.latitudeParameters)
+                    .forGetter(state -> state.latitudeParameters),
+            Codec.BOOL.optionalFieldOf("additional_biomes", true)
+                    .forGetter(state -> state.additionalBiomes)
     ).apply(instance, WorldScaleSettingsState::new));
 
     /** Nested for the same builder-field-limit reason as the river codec. */
@@ -96,24 +98,26 @@ public final class WorldScaleSettingsState extends SavedData {
     private RiverParameters riverParameters;
     private CaveParameters caveParameters;
     private LatitudeParameters latitudeParameters;
+    private boolean additionalBiomes;
 
     /**
      * Creates a default state for worlds that do not yet have saved terrain diffusion settings.
      */
     private WorldScaleSettingsState(int configuredScale, boolean hasExplicitScale, String riverModeId,
                                     RiverParameters riverParameters, CaveParameters caveParameters,
-                                    LatitudeParameters latitudeParameters) {
+                                    LatitudeParameters latitudeParameters, boolean additionalBiomes) {
         this.scale = WorldScaleManager.clampScale(configuredScale);
         this.explicitScale = hasExplicitScale;
         this.riverMode = RiverMode.byId(riverModeId);
         this.riverParameters = riverParameters;
         this.caveParameters = caveParameters;
         this.latitudeParameters = latitudeParameters;
+        this.additionalBiomes = additionalBiomes;
     }
 
     public static WorldScaleSettingsState createDefault() {
         return new WorldScaleSettingsState(WorldScaleManager.DEFAULT_SCALE, false, RiverMode.DEFAULT.id(),
-                RiverParameters.DEFAULT, CaveParameters.DEFAULT, LatitudeParameters.DEFAULT);
+                RiverParameters.DEFAULT, CaveParameters.DEFAULT, LatitudeParameters.DEFAULT, true);
     }
 
     public RiverMode getRiverMode() {
@@ -149,6 +153,15 @@ public final class WorldScaleSettingsState extends SavedData {
 
     public void setLatitudeParameters(LatitudeParameters parameters) {
         this.latitudeParameters = parameters;
+        setDirty();
+    }
+
+    public boolean hasAdditionalBiomes() {
+        return additionalBiomes;
+    }
+
+    public void setAdditionalBiomes(boolean enabled) {
+        this.additionalBiomes = enabled;
         setDirty();
     }
 

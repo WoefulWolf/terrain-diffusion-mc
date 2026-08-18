@@ -80,6 +80,10 @@ public final class BiomeColors {
         put(108, "forest_sparse",           0x63924A);
         put(115, "taiga_sparse",            0x5A806A);
         put(116, "snowy_taiga_sparse",      0xBFD4CE);
+        // A lake and the river feeding it are one body of water on the ground, so they
+        // are one colour here.
+        put(136, "lake",                    0x3A6FD0);
+        put(137, "frozen_lake",             0x93BEDC);
     }
 
     private BiomeColors() {

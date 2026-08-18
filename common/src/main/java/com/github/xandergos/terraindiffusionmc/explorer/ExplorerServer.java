@@ -2,6 +2,7 @@ package com.github.xandergos.terraindiffusionmc.explorer;
 
 import com.github.xandergos.terraindiffusionmc.config.TerrainDiffusionConfig;
 import com.github.xandergos.terraindiffusionmc.infinitetensor.FloatTensor;
+import com.github.xandergos.terraindiffusionmc.pipeline.BiomeClassifier;
 import com.github.xandergos.terraindiffusionmc.pipeline.LocalTerrainProvider;
 import com.github.xandergos.terraindiffusionmc.pipeline.WorldPipelineModelConfig;
 import com.github.xandergos.terraindiffusionmc.pipeline.river.CoarseHydrology;
@@ -415,21 +416,27 @@ public final class ExplorerServer {
     /**
      * Marks lake cells as water in a biome grid.
      *
-     * <p>A lake keeps whatever biome its ground had before the water arrived, so a biome
-     * map drawn straight from the ids shows basins as savanna or forest while the rivers
-     * running into them are plainly blue. Painting the cells here rather than colouring
-     * them afterwards means they pick up the same relief shading as everything else.
+     * <p>Drawn from the region analysis rather than left to the ids, so this view and the
+     * rivers view are painted from the same source and agree cell for cell: the generator
+     * reconciles a lake's level across the regions that claim it and drops the ones that
+     * come out below sea level, which trims a fringe the rivers view still shows.
+     * Painting the cells here rather than colouring them afterwards means they pick up
+     * the same relief shading as everything else.
      */
     private static void overlayLakeBiomes(short[] ids, int H, int W, int i0, int j0)
             throws Exception {
         if (WorldScaleManager.getRiverMode() == RiverMode.OFF) return;
         int scale = WorldScaleManager.getCurrentScale();
+        // The region data carries no temperature, so a frozen lake reads as a lake here.
+        // Both share the water colour; only the hover readout can tell.
+        short id = WorldScaleManager.hasAdditionalBiomes()
+                ? BiomeClassifier.LAKE : (short) BiomeColors.WATER_ID;
         for (RiverRegions.Region region : regionsFor(i0, j0, H, W)) {
             for (int k = 0; k < region.lakeSurface.length; k++) {
                 int r = Math.floorDiv(region.lakeBlockZ[k], scale) - i0;
                 int c = Math.floorDiv(region.lakeBlockX[k], scale) - j0;
                 if (r < 0 || r >= H || c < 0 || c >= W) continue;
-                ids[r * W + c] = (short) BiomeColors.WATER_ID;
+                ids[r * W + c] = id;
             }
         }
     }

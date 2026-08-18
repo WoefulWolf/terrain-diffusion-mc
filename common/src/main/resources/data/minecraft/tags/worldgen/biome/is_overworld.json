@@ -2,6 +2,8 @@
   "values": [
     "terrain-diffusion-mc:forest_sparse",
     "terrain-diffusion-mc:taiga_sparse",
-    "terrain-diffusion-mc:snowy_taiga_sparse"
+    "terrain-diffusion-mc:snowy_taiga_sparse",
+    "terrain-diffusion-mc:lake",
+    "terrain-diffusion-mc:frozen_lake"
   ]
 }

@@ -813,7 +813,8 @@ public final class LocalTerrainProvider {
         // mouth size. A tributary reaching a bigger river finds those cells already wet
         // at the lower surface, so its own water stops at the join and steps down like a
         // little waterfall, instead of riding out over the river on its higher surface.
-        stampLakes(regions, elev, waterFlat, riverClassFlat, temperature, i1, j1, height, width,
+        stampLakes(regions, elev, biomeFlat, waterFlat, riverClassFlat, temperature,
+                i1, j1, height, width,
                 metresPerBlock, freeboardMetres, params.lakeDepthBlocks, scale);
         // Before the rivers, so a channel crossing a fringe stamps itself back on top.
         stampLakeFringes(regions, elev, biomeFlat, climate, waterFlat, i1, j1, height, width,
@@ -1020,7 +1021,8 @@ public final class LocalTerrainProvider {
      * the one that saw most of the basin.
      */
     private static void stampLakes(List<RiverRegions.Region> regions, float[] elev,
-                                   float[] waterFlat, byte[] riverClassFlat, float[] temperature,
+                                   short[] biomeFlat, float[] waterFlat, byte[] riverClassFlat,
+                                   float[] temperature,
                                    int i1, int j1, int height, int width,
                                    float metresPerBlock, float freeboardMetres,
                                    float lakeDepthBlocks, int scale) {
@@ -1095,6 +1097,14 @@ public final class LocalTerrainProvider {
                         if (elev[idx] > bedCap) elev[idx] = bedCap;
                         if (waterFlat != null && waterFlat[idx] == Float.NEGATIVE_INFINITY) {
                             waterFlat[idx] = level;
+                            // A basin otherwise keeps the biome of the ground it drowned,
+                            // so it grows and spawns whatever dry land there would. Water
+                            // brings its own biome, the same way a channel does.
+                            if (biomeFlat != null) {
+                                boolean frozen = temperature != null && temperature[idx] < 0f;
+                                biomeFlat[idx] = frozen ? BiomeClassifier.FROZEN_LAKE
+                                        : BiomeClassifier.LAKE;
+                            }
                         }
                         // Slack class, so the bed pass gives lake floors sand and clay.
                         if (riverClassFlat != null && riverClassFlat[idx] == 0) riverClassFlat[idx] = 1;
@@ -1490,6 +1500,9 @@ public final class LocalTerrainProvider {
     private static HeightmapData buildHeightmapData(float[] elevFlat, short[] biomeFlat,
                                                     float[] waterFlat, byte[] riverClassFlat,
                                                     int H, int W) {
+        // Read once rather than per cell: every rule above works in the mod's own
+        // vocabulary, and only the ids leaving here answer to the world's setting.
+        boolean additionalBiomes = WorldScaleManager.hasAdditionalBiomes();
         short[][] heightmap = new short[H][W];
         short[][] biomeIds  = new short[H][W];
         short[][] waterLevel = new short[H][W];
@@ -1499,7 +1512,8 @@ public final class LocalTerrainProvider {
                 int idx = r * W + c;
                 float e = elevFlat[idx];
                 heightmap[r][c] = (short) Math.max(-32768, Math.min(32767, (int) Math.floor(e)));
-                biomeIds[r][c]  = biomeFlat[idx];
+                biomeIds[r][c]  = additionalBiomes ? biomeFlat[idx]
+                        : BiomeClassifier.vanillaEquivalent(biomeFlat[idx]);
                 riverClass[r][c] = riverClassFlat == null ? 0 : riverClassFlat[idx];
 
                 // Sea level is 0 m, so a surface at or below it is the ocean's to fill.

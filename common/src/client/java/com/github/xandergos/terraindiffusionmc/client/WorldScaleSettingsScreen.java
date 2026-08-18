@@ -41,6 +41,8 @@ public final class WorldScaleSettingsScreen extends Screen {
     private static final Component CAVE_ERROR_TEXT = Component.literal("Cave settings must be whole numbers")
             .withStyle(ChatFormatting.RED);
 
+    private static final Component BIOME_LABEL_TEXT = Component.literal("Biomes");
+
     private static final Component CLIMATE_LABEL_TEXT = Component.literal("Climate");
     private static final Component CLIMATE_ERROR_TEXT = Component.literal("Climate settings must be whole numbers")
             .withStyle(ChatFormatting.RED);
@@ -70,6 +72,8 @@ public final class WorldScaleSettingsScreen extends Screen {
     private EditBox latitudePoleDistanceField;
     private EditBox latitudeStartField;
     private EditBox latitudeStrengthField;
+    private Button additionalBiomesButton;
+    private boolean additionalBiomes = true;
 
     public WorldScaleSettingsScreen(Screen parentScreen) {
         super(Component.translatable("terrain-diffusion-mc.world_settings.title"));
@@ -206,6 +210,20 @@ public final class WorldScaleSettingsScreen extends Screen {
                         + "and poles. Around 25 gives frozen poles and tropical equator. "
                         + "0: no banding, climate ignores position as before.");
 
+        // Biomes share the Climate column, which ends two rows up.
+        addCenteredTextWidget(BIOME_LABEL_TEXT, climateCenter, centerY + 22, 0xFFFFFF);
+
+        additionalBiomes = WorldScaleSelectionState.getPendingAdditionalBiomesOrDefault();
+        additionalBiomesButton = Button.builder(additionalBiomesLabel(), button -> {
+                    additionalBiomes = !additionalBiomes;
+                    additionalBiomesButton.setMessage(additionalBiomesLabel());
+                    additionalBiomesButton.setTooltip(Tooltip.create(additionalBiomesDescription()));
+                })
+                .bounds(climateCenter - BUTTON_WIDTH, centerY + 34, BUTTON_WIDTH * 2, BUTTON_HEIGHT)
+                .build();
+        additionalBiomesButton.setTooltip(Tooltip.create(additionalBiomesDescription()));
+        this.addRenderableWidget(additionalBiomesButton);
+
         this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> onDonePressed())
                 .bounds(centerX - BUTTON_WIDTH - 5, centerY + 146, BUTTON_WIDTH, BUTTON_HEIGHT)
                 .build());
@@ -229,6 +247,20 @@ public final class WorldScaleSettingsScreen extends Screen {
         field.setTooltip(Tooltip.create(Component.literal(description)));
         this.addRenderableWidget(field);
         return field;
+    }
+
+    private Component additionalBiomesLabel() {
+        return Component.literal("Extra biomes: " + (additionalBiomes ? "On" : "Off"));
+    }
+
+    /** What switching them off actually costs, since the name does not say. */
+    private Component additionalBiomesDescription() {
+        String text = additionalBiomes
+                ? "Biomes this mod adds beyond vanilla's list: lakes, and thinned-out "
+                        + "forest and taiga. Fixed once the world is created."
+                : "Vanilla biomes only. The same ground still generates, but lakes read "
+                        + "as rivers and thinned forest as ordinary forest.";
+        return Component.literal(text).copy().withStyle(style -> style.withColor(0xAAAAAA));
     }
 
     private Component riverModeLabel() {
@@ -335,6 +367,7 @@ public final class WorldScaleSettingsScreen extends Screen {
             WorldScaleSelectionState.setPendingRiverParameters(riverParameters);
             WorldScaleSelectionState.setPendingCaveParameters(caveParameters);
             WorldScaleSelectionState.setPendingLatitudeParameters(latitudeParameters);
+            WorldScaleSelectionState.setPendingAdditionalBiomes(additionalBiomes);
             onClose();
         } catch (NumberFormatException exception) {
             validationTextWidget.setMessage(ERROR_TEXT);

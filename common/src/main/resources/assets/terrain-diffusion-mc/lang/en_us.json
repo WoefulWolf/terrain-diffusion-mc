@@ -7,5 +7,7 @@
   "terrain-diffusion-mc.world_settings.scale_error": "Scale must be an integer >= 1",
   "biome.terrain-diffusion-mc.forest_sparse": "Sparse Forest",
   "biome.terrain-diffusion-mc.taiga_sparse": "Sparse Taiga",
-  "biome.terrain-diffusion-mc.snowy_taiga_sparse": "Sparse Snowy Taiga"
+  "biome.terrain-diffusion-mc.snowy_taiga_sparse": "Sparse Snowy Taiga",
+  "biome.terrain-diffusion-mc.lake": "Lake",
+  "biome.terrain-diffusion-mc.frozen_lake": "Frozen Lake"
 }

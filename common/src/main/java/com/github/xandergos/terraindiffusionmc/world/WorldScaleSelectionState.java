@@ -94,6 +94,25 @@ public final class WorldScaleSelectionState {
         return parameters != null ? parameters : LatitudeParameters.DEFAULT;
     }
 
+    private static final AtomicReference<Boolean> PENDING_ADDITIONAL_BIOMES =
+            new AtomicReference<>();
+
+    /** Stores a pending additional-biomes choice selected in world creation UI. */
+    public static void setPendingAdditionalBiomes(boolean enabled) {
+        PENDING_ADDITIONAL_BIOMES.set(enabled);
+    }
+
+    /** Returns and clears the pending additional-biomes choice, if any. */
+    public static Boolean consumePendingAdditionalBiomes() {
+        return PENDING_ADDITIONAL_BIOMES.getAndSet(null);
+    }
+
+    /** Returns the pending additional-biomes choice, or on if none is set. */
+    public static boolean getPendingAdditionalBiomesOrDefault() {
+        Boolean enabled = PENDING_ADDITIONAL_BIOMES.get();
+        return enabled == null || enabled;
+    }
+
     /** Stores a pending river mode selected in world creation UI. */
     public static void setPendingRiverMode(RiverMode mode) {
         PENDING_RIVER_MODE.set(mode);

@@ -37,7 +37,7 @@ public final class RiverParameters {
      * branches and leaves nothing on the map under twenty blocks wide, which reads as a
      * country of big rivers and no streams.
      */
-    public static final int DEFAULT_HEADWATER_CELLS = 600;
+    public static final int DEFAULT_HEADWATER_CELLS = 150;
 
     /**
      * Catchment that counts as a one-block spring, which every channel's width and depth
@@ -97,6 +97,24 @@ public final class RiverParameters {
      * survivable, at which point basin size becomes reachable again.
      */
     public static final float DEFAULT_LAKE_INCISE_BLOCKS = 0.25f;
+    /**
+     * How many times more catchment a spring needs on the worst ground of its kind than on
+     * the best: low against high, dry against wet or cold, level against broken.
+     *
+     * <p>One dial each, and they multiply, so relative importance is simply their ratio — a
+     * flatness of 10 against a dryness of 2 means relief counts five times for what moisture
+     * does. Set one to 1 and that factor stops mattering; set it below 1 and it becomes a
+     * boost instead, so dead-level ground can actively suppress springs rather than merely
+     * failing to encourage them.
+     *
+     * <p>The strengths are exposed, the bands they act over are not: where high ground
+     * begins, or how much five-cell relief reads as broken, stay fixed. A world wanting
+     * springs somewhere the terrain does not currently call rugged needs the band moved,
+     * which no strength can substitute for.
+     */
+    public static final float DEFAULT_SPRING_ELEVATION_PENALTY = 8f;
+    public static final float DEFAULT_SPRING_DRYNESS_PENALTY = 5f;
+    public static final float DEFAULT_SPRING_FLAT_PENALTY = 15f;
     /** Blocks the waterline wobbles in and out on the largest rivers. */
     public static final float DEFAULT_EDGE_WOBBLE_BLOCKS = 5.0f;
     /** Blocks of coherent relief on river and lake floors. */
@@ -107,6 +125,8 @@ public final class RiverParameters {
             DEFAULT_MAX_WIDTH_BLOCKS, DEFAULT_MAX_DEPTH_BLOCKS,
             DEFAULT_WIDTH_EXPONENT, DEFAULT_FREEBOARD_BLOCKS,
             DEFAULT_LAKE_MIN_CELLS, DEFAULT_LAKE_DEPTH_BLOCKS, DEFAULT_LAKE_INCISE_BLOCKS,
+            DEFAULT_SPRING_ELEVATION_PENALTY, DEFAULT_SPRING_DRYNESS_PENALTY,
+            DEFAULT_SPRING_FLAT_PENALTY,
             DEFAULT_EDGE_WOBBLE_BLOCKS, DEFAULT_BED_RELIEF_BLOCKS);
 
     public final int mainChannelCells;
@@ -119,6 +139,9 @@ public final class RiverParameters {
     public final int lakeMinCells;
     public final float lakeDepthBlocks;
     public final float lakeInciseBlocks;
+    public final float springElevationPenalty;
+    public final float springDrynessPenalty;
+    public final float springFlatPenalty;
     public final float edgeWobbleBlocks;
     public final float bedReliefBlocks;
 
@@ -126,6 +149,8 @@ public final class RiverParameters {
                            int maxWidthBlocks, int maxDepthBlocks,
                            float widthExponent, float freeboardBlocks,
                            int lakeMinCells, float lakeDepthBlocks, float lakeInciseBlocks,
+                           float springElevationPenalty, float springDrynessPenalty,
+                           float springFlatPenalty,
                            float edgeWobbleBlocks, float bedReliefBlocks) {
         // Headroom above the default, so a world can still be made drier than stock.
         this.mainChannelCells = clamp(mainChannelCells, 1000, 2_000_000);
@@ -138,6 +163,10 @@ public final class RiverParameters {
         this.lakeMinCells = clamp(lakeMinCells, 50, 10_000);
         this.lakeDepthBlocks = clamp(lakeDepthBlocks, 1f, 8f);
         this.lakeInciseBlocks = clamp(lakeInciseBlocks, 0.25f, 8f);
+        // Below one a penalty becomes a boost, which is a legitimate choice.
+        this.springElevationPenalty = clamp(springElevationPenalty, 0.1f, 100f);
+        this.springDrynessPenalty = clamp(springDrynessPenalty, 0.1f, 100f);
+        this.springFlatPenalty = clamp(springFlatPenalty, 0.1f, 100f);
         this.edgeWobbleBlocks = clamp(edgeWobbleBlocks, 0f, 12f);
         this.bedReliefBlocks = clamp(bedReliefBlocks, 0f, 4f);
     }

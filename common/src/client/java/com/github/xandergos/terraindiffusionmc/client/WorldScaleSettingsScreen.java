@@ -35,6 +35,9 @@ public final class WorldScaleSettingsScreen extends Screen {
             .withStyle(ChatFormatting.RED);
 
     private static final Component CAVE_LABEL_TEXT = Component.literal("Caves");
+    private static final Component SPRING_LABEL_TEXT = Component.literal("Springs");
+    private static final Component SPRING_ERROR_TEXT = Component.literal(
+            "Spring settings must be numbers").withStyle(ChatFormatting.RED);
     private static final Component CAVE_ERROR_TEXT = Component.literal("Cave settings must be whole numbers")
             .withStyle(ChatFormatting.RED);
 
@@ -61,6 +64,9 @@ public final class WorldScaleSettingsScreen extends Screen {
     private EditBox riverBedReliefField;
     private EditBox caveSmallSealField;
     private EditBox caveLargeSealField;
+    private EditBox springElevationField;
+    private EditBox springDrynessField;
+    private EditBox springFlatField;
     private EditBox latitudePoleDistanceField;
     private EditBox latitudeStartField;
     private EditBox latitudeStrengthField;
@@ -165,6 +171,22 @@ public final class WorldScaleSettingsScreen extends Screen {
                         + "blocks. Rare mouths still open in crevasse, karst and canyon country. "
                         + "0: big openings appear anywhere, like vanilla.");
 
+
+        // Springs share the Caves column: the Rivers column is full, and stacking a
+        // seventh row there would push the buttons off a short screen.
+        addCenteredTextWidget(SPRING_LABEL_TEXT, cavesCenter, centerY + 2, 0xFFFFFF);
+        springElevationField = addLabeledField(cavesLeft, centerY + 42, "Low ground",
+                String.valueOf(p.springElevationPenalty),
+                "How many times more catchment a spring needs down in the lowlands than up "
+                        + "high. 1 ignores height entirely; below 1 favours low ground.");
+        springDrynessField = addLabeledField(cavesRight, centerY + 42, "Dry ground",
+                String.valueOf(p.springDrynessPenalty),
+                "How many times more catchment a spring needs where it is warm and dry than "
+                        + "where it is wet or cold. 1 ignores climate entirely.");
+        springFlatField = addLabeledField(cavesLeft, centerY + 72, "Flat ground",
+                String.valueOf(p.springFlatPenalty),
+                "How many times more catchment a spring needs on level ground than on broken "
+                        + "ground. Raise it to keep tendrils off plains and plateaus.");
         addCenteredTextWidget(CLIMATE_LABEL_TEXT, climateCenter, centerY - 82, 0xFFFFFF);
 
         LatitudeParameters lat = WorldScaleSelectionState.getPendingLatitudeParametersOrDefault();
@@ -276,6 +298,9 @@ public final class WorldScaleSettingsScreen extends Screen {
                         Integer.parseInt(riverLakeSizeField.getValue().trim()),
                         Float.parseFloat(riverLakeDepthField.getValue().trim()),
                         Float.parseFloat(riverLakeInciseField.getValue().trim()),
+                        Float.parseFloat(springElevationField.getValue().trim()),
+                        Float.parseFloat(springDrynessField.getValue().trim()),
+                        Float.parseFloat(springFlatField.getValue().trim()),
                         Float.parseFloat(riverWobbleField.getValue().trim()),
                         Float.parseFloat(riverBedReliefField.getValue().trim()));
             } catch (NumberFormatException exception) {

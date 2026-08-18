@@ -105,10 +105,12 @@ public final class RiverNetwork {
      * begins already carrying real flow, and appears out of the ground as a thick stump.
      * A source that starts big therefore grows a few tendrils — short, budgeted walks
      * further up its own drainage tree at a relaxed floor — so the stump dissolves into
-     * thin rivulets converging along their true valleys. {@code headwaterRef} is the
-     * unpriced spring floor the tendril thresholds are judged against, and {@code i0},
-     * {@code j0} anchor the budget jitter to world coordinates. Lakes of at least
-     * {@code lakeOutletMinCells} cells keep their outlet route regardless of discharge.
+     * thin rivulets converging along their true valleys. Those walks are priced by the
+     * same per-cell floor as the trace, so they cannot wander onto ground a source could
+     * not have started on; {@code headwaterRef} only decides which sources count as stumps
+     * worth dissolving, and {@code i0}, {@code j0} anchor the budget jitter to world
+     * coordinates. Lakes of at least {@code lakeOutletMinCells} cells keep their outlet
+     * route regardless of discharge.
      */
     public static List<Reach> extractMainRivers(CoarseHydrology.Drainage d, float minDischarge,
                                                 float edgeFedMin, float[] headwaterMin,
@@ -154,7 +156,7 @@ public final class RiverNetwork {
                 int r = cur / w, c = cur - r * w;
                 int budget = TENDRIL_BUDGET_BASE
                         + worldHash(i0 + r, j0 + c) % TENDRIL_BUDGET_JITTER;
-                growTendrils(d, keep, cur, TENDRIL_FLOOR_FACTOR * headwaterRef,
+                growTendrils(d, keep, cur, headwaterMin, TENDRIL_FLOOR_FACTOR,
                         budget, true, i0, j0);
             }
         }
@@ -239,10 +241,14 @@ public final class RiverNetwork {
      * Walks upstream keeping thin feeders: the largest inflow continues this tendril,
      * and now and then a second inflow forks off with half the remaining budget, so the
      * feeders join the stem at staggered points instead of a single crow's foot.
+     *
+     * <p>{@code factor} is a share of each cell's OWN spring floor, so a tendril is as
+     * choosy about where it may run as the trace that spawned it: freely up a wet broken
+     * hillside, barely at all across a level plateau.
      */
     private static void growTendrils(CoarseHydrology.Drainage d, boolean[] keep, int cur,
-                                     float floor, int budget, boolean allowFork,
-                                     int i0, int j0) {
+                                     float[] headwaterMin, float factor, int budget,
+                                     boolean allowFork, int i0, int j0) {
         int h = d.height, w = d.width;
         while (budget-- > 0) {
             int r = cur / w, c = cur - r * w;
@@ -254,7 +260,11 @@ public final class RiverNetwork {
                 int ni = nr * w + nc;
                 if (d.ocean[ni] || keep[ni] || d.downstream[ni] != cur) continue;
                 float f = d.discharge[ni];
-                if (f < floor) continue;
+                // Priced against the cell being stepped into, not one figure for the
+                // whole region. A single figure overrides every terrain rule the main
+                // trace obeys, and tendrils then creep over level ground as readily as
+                // up a gully — the one place they have no business being.
+                if (f < headwaterMin[ni] * factor) continue;
                 if (f > bestFlow) {
                     second = best;
                     secondFlow = bestFlow;
@@ -269,7 +279,7 @@ public final class RiverNetwork {
             keep[best] = true;
             if (allowFork && second >= 0 && worldHash(i0 + r, j0 + c) % 2 == 0) {
                 keep[second] = true;
-                growTendrils(d, keep, second, floor, budget / 2, false, i0, j0);
+                growTendrils(d, keep, second, headwaterMin, factor, budget / 2, false, i0, j0);
             }
             cur = best;
         }

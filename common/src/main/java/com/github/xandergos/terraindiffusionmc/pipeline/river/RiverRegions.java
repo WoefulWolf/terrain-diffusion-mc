@@ -57,10 +57,6 @@ public final class RiverRegions {
     private static final float SPRING_LOW_ELEVATION_M = 150f;
     /** Above this elevation the mountain factor applies in full. */
     private static final float SPRING_HIGH_ELEVATION_M = 1000f;
-    private static final float SPRING_LOWLAND_FACTOR = 8f;
-    private static final float SPRING_MOUNTAIN_FACTOR = 0.25f;
-    /** Rainfall below this share of reference cannot buy the floor down any further. */
-    private static final float SPRING_MIN_WETNESS = 0.2f;
     /**
      * Altitude alone earns nothing: the mountain discount is scaled by how spring-friendly
      * the place is, the best of wet, cold, or rugged. A high dry savanna plateau fails all
@@ -270,10 +266,18 @@ public final class RiverRegions {
         if (!hasLand) return Region.EMPTY;
         float norm = precip == null ? 1f : REFERENCE_PRECIP;
 
-        // Where a spring may sit is the terrain's choice. Elevation is absolute metres, so
-        // the same mountains breed the same springs at any world scale, but height alone
-        // earns nothing: the discount is scaled by the best of wet, cold, or rugged, so a
-        // high dry savanna plateau stays springless while cliff country qualifies dry.
+        // Where a spring may sit is the terrain's choice, priced as three independent
+        // penalties on the catchment a channel must gather before it may begin. Ideal
+        // ground — high, wet or cold, and broken — pays none of them and starts a stream at
+        // exactly the chosen size; every step away from that multiplies the bar.
+        //
+        // Independent multipliers rather than one blended score, so each factor can be set
+        // without disturbing the others and their ratio IS their relative importance. A
+        // penalty under one inverts into a boost, which is what lets level ground suppress
+        // springs outright instead of merely failing to encourage them.
+        //
+        // Wet or cold still qualifies a place, whichever is better: alps earn their springs
+        // by cold, a rainforest by rain, and a warm dry plateau earns nothing either way.
         float[] relief = fiveCellRelief(elev, h, w);
         float[] headwaterMin = new float[n];
         for (int i = 0; i < n; i++) {
@@ -287,19 +291,14 @@ public final class RiverRegions {
             float coldT = temperature == null ? 0f
                     : clamp01((SPRING_COLD_NONE_C - temperature[i])
                             / (SPRING_COLD_NONE_C - SPRING_COLD_FULL_C));
+            float qualifyT = Math.max(wetT, coldT);
             float ruggedT = clamp01((relief[i] - SPRING_RELIEF_NONE_M)
                     / (SPRING_RELIEF_FULL_M - SPRING_RELIEF_NONE_M));
-            float suitability = Math.max(wetT, Math.max(coldT, ruggedT));
 
-            float t = elevT * suitability;
-            float elevFactor = SPRING_LOWLAND_FACTOR
-                    + (SPRING_MOUNTAIN_FACTOR - SPRING_LOWLAND_FACTOR) * t;
-            // Dryness raises the floor; wetness never lowers it below the terrain's
-            // choice, or the wettest ranges sprout a spring from every gully.
-            float wetness = precip == null ? 1f
-                    : Math.min(1f, Math.max(SPRING_MIN_WETNESS,
-                            Math.max(0f, precip[i]) / REFERENCE_PRECIP));
-            headwaterMin[i] = params.headwaterCells * norm * elevFactor / wetness;
+            headwaterMin[i] = params.headwaterCells * norm
+                    * (float) Math.pow(params.springElevationPenalty, 1f - elevT)
+                    * (float) Math.pow(params.springDrynessPenalty, 1f - qualifyT)
+                    * (float) Math.pow(params.springFlatPenalty, 1f - ruggedT);
         }
 
         List<RiverNetwork.Reach> reaches = RiverNetwork.extractMainRivers(d,

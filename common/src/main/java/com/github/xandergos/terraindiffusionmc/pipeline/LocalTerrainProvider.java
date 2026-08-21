@@ -815,7 +815,7 @@ public final class LocalTerrainProvider {
         // little waterfall, instead of riding out over the river on its higher surface.
         LakeGrid lakes = stampLakes(regions, elev, biomeFlat, waterFlat, riverClassFlat,
                 temperature, i1, j1, height, width,
-                metresPerBlock, freeboardMetres, params.lakeDepthBlocks, scale);
+                metresPerBlock, freeboardMetres, params.lakeDepthBlocks, scale, carveMargin);
         // Before the rivers, so a channel crossing a fringe stamps itself back on top.
         stampLakeFringes(regions, elev, biomeFlat, climate, waterFlat, i1, j1, height, width,
                 metresPerBlock, freeboardMetres, scale);
@@ -946,6 +946,14 @@ public final class LocalTerrainProvider {
             for (int k = 0; k < len; k++) {
                 falling = Math.min(falling, path.ground[k] - freeboardMetres);
                 pSurf[k] = Math.max(falling, TIDEWATER_SURFACE_METRES);
+                // Where the path crosses a stamped basin, the basin's level is the
+                // surface. The lake cells are locked at it already; raising the channel's
+                // own claims to meet them makes the crossing one plane instead of a
+                // ribbon of standing water proud of the river carved around it. Applied
+                // per point, not carried downstream, so the river resumes its own profile
+                // past the basin and the basin spills over its rim as a fall.
+                float basin = lakes.at(path.blockZ[k], path.blockX[k]);
+                if (basin != Float.NEGATIVE_INFINITY && basin > pSurf[k]) pSurf[k] = basin;
             }
 
             int count = 0;
@@ -1028,7 +1036,7 @@ public final class LocalTerrainProvider {
                                    float[] temperature,
                                    int i1, int j1, int height, int width,
                                    float metresPerBlock, float freeboardMetres,
-                                   float lakeDepthBlocks, int scale) {
+                                   float lakeDepthBlocks, int scale, int carveMargin) {
         // A cell just outside the tile still lowers banks inside it, so the reconciled grid
         // is padded rather than clipped to the tile edge. Cell coordinates come off the same
         // global native grid in every region, so one shared cell lands on one slot whichever
@@ -1037,7 +1045,11 @@ public final class LocalTerrainProvider {
         // Wide enough for the bank passes to reach in as well: they raise ground around a
         // shore, and a tile that could not see a shore just outside itself would leave a
         // notch in the bank exactly on its own border.
-        int pad = 2 + (int) Math.ceil(RiverCarver.leveeReachBlocks() / scale);
+        // Also wide enough for every path point a tile carves: a point outside the pad
+        // reads no basin here and a basin in the next tile, and its surface would differ
+        // between the two.
+        int pad = 2 + (int) Math.ceil(
+                (RiverCarver.leveeReachBlocks() + carveMargin) / (float) scale);
         int cz0 = Math.floorDiv(i1, scale) - pad;
         int cz1 = Math.floorDiv(i1 + height - 1, scale) + pad;
         int cx0 = Math.floorDiv(j1, scale) - pad;

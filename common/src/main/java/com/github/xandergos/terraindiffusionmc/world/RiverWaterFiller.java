@@ -36,9 +36,9 @@ public final class RiverWaterFiller {
 
     private static final BlockState WATER = Blocks.WATER.defaultBlockState();
     /**
-     * Flowing states for step-downs, chosen to be exactly what vanilla's flow rules settle
-     * into so they are stable: a level-1 wedge is held by the source beside it, and a
-     * level-8 falling block is held by the water above it.
+     * The two flowing states used at steps and falls. Both are what vanilla's own flow
+     * rules settle into, so a tick leaves them as they are: level 1 is held by the source
+     * beside it, level 8 by the water above it.
      */
     private static final BlockState FLOWING = Blocks.WATER.defaultBlockState()
             .setValue(LiquidBlock.LEVEL, 1);
@@ -175,12 +175,17 @@ public final class RiverWaterFiller {
      * Dresses every step-down with flowing water, so the surface slopes and falls instead
      * of dropping in bare full-block terraces.
      *
-     * <p>Two parts, both the steady state vanilla's own flow rules produce. At the step
-     * itself, the lower column is topped up with a level-1 wedge held by the neighbouring
+     * <p>Three parts, each a state vanilla's own flow rules settle into. At the step
+     * itself the lower column is topped up with a level-1 wedge held by the neighbouring
      * source, with falling water beneath on taller drops. From there the flow spreads
      * across the pool below: a source pool cannot be displaced, so it acts as a floor, and
-     * the sheet thins one level per block up to the full seven vanilla allows. The spread
-     * only walks columns of equal surface height, so a follow-up drop ends it naturally.
+     * the sheet thins one level per block up to the seven vanilla allows. The spread only
+     * walks columns of equal surface height, so a follow-up drop ends it naturally. On a
+     * drop of two or more the upper column at the edge gives up its source above the lower
+     * surface as well: that water is going over the edge, and as flowing and falling
+     * blocks it ends a falling run the way a real fall does, which is what waterfall
+     * effects key on. A one-block step is a ramp, not a fall, and keeps its source right
+     * to the edge.
      *
      * <p>Levels come from a breadth-first pass over the whole tile, not the chunk, so the
      * ramp does not care where chunk borders fall.
@@ -191,10 +196,10 @@ public final class RiverWaterFiller {
                                     BlockPos.MutableBlockPos pos) {
         int h = data.height, w = data.width;
 
-        // Water surface top block per tile column; MIN_VALUE where the rivers put none.
-        // A shoreline column can carry a surface claim while quantisation leaves it no
-        // actual water block; trusted as a higher neighbour it gets a wedge built against
-        // thin air, standing as a ridge of raised water along the bank.
+        // Water surface top block per tile column; MIN_VALUE where the rivers put none,
+        // and also where quantisation leaves a shoreline claim below its own ground. Such
+        // a column holds no water block, and trusted as a higher neighbour it would have a
+        // wedge built against thin air, a ridge of raised water along the bank.
         int[] top = new int[h * w];
         for (int r = 0; r < h; r++) {
             for (int c = 0; c < w; c++) {
@@ -286,6 +291,24 @@ public final class RiverWaterFiller {
                                         .setValue(LiquidBlock.LEVEL, lvl[i]), false);
                     }
                 }
+
+                // The upper edge of a fall. With a neighbour two or more blocks lower, the
+                // column's own source above the lower surface is water going over the edge,
+                // not a pool: level 1 at the top, held by the source behind it (falling
+                // instead when a sheet runs over it), and falling beneath, so the column
+                // ends a falling run just as the stack beside it does. The lower surface is
+                // the floor; from there down the two pools are one body and stay source. A
+                // frozen-over column keeps its ice and the still water under it.
+                int lowest = minNeighbourTop(top, i, h, w);
+                if (!frozenOver && lowest <= t - 2) {
+                    pos.setY(t + 1);
+                    boolean covered = !chunk.getBlockState(pos).getFluidState().isEmpty();
+                    for (int y = t; y > lowest; y--) {
+                        pos.setY(y);
+                        if (!chunk.getBlockState(pos).getFluidState().isSource()) break;
+                        chunk.setBlockState(pos, y == t && !covered ? FLOWING : FALLING, false);
+                    }
+                }
             }
         }
     }
@@ -296,6 +319,7 @@ public final class RiverWaterFiller {
                 && (data.riverClass[localZ][localX] & RiverCarver.FULLY_FROZEN_BIT) != 0;
     }
 
+    /** Highest water surface among the four neighbours; MIN_VALUE when none holds water. */
     private static int maxNeighbourTop(int[] top, int i, int h, int w) {
         int r = i / w, c = i - r * w;
         int best = Integer.MIN_VALUE;
@@ -303,6 +327,17 @@ public final class RiverWaterFiller {
         if (r > 0 && top[i - w] != Integer.MIN_VALUE) best = Math.max(best, top[i - w]);
         if (c + 1 < w && top[i + 1] != Integer.MIN_VALUE) best = Math.max(best, top[i + 1]);
         if (c > 0 && top[i - 1] != Integer.MIN_VALUE) best = Math.max(best, top[i - 1]);
+        return best;
+    }
+
+    /** Lowest water surface among the four neighbours; MAX_VALUE when none holds water. */
+    private static int minNeighbourTop(int[] top, int i, int h, int w) {
+        int r = i / w, c = i - r * w;
+        int best = Integer.MAX_VALUE;
+        if (r + 1 < h && top[i + w] != Integer.MIN_VALUE) best = Math.min(best, top[i + w]);
+        if (r > 0 && top[i - w] != Integer.MIN_VALUE) best = Math.min(best, top[i - w]);
+        if (c + 1 < w && top[i + 1] != Integer.MIN_VALUE) best = Math.min(best, top[i + 1]);
+        if (c > 0 && top[i - 1] != Integer.MIN_VALUE) best = Math.min(best, top[i - 1]);
         return best;
     }
 
@@ -426,9 +461,9 @@ public final class RiverWaterFiller {
     /**
      * Whether vanilla may freeze this water column.
      *
-     * <p>Flowing steps carry no ice, so a frozen river with drops freezes in zebra
+     * <p>Flowing steps carry no ice, so a frozen river with drops would freeze in zebra
      * stripes between them; and a real river freezes from its banks inward, where the
-     * current is slowest. So: no ice within three blocks of a drop, and ice odds that
+     * current is slowest. Hence no ice within three blocks of a drop, and ice odds that
      * fall away from the bank, dithered so the frozen margin looks grown rather than
      * drawn. Lakes, oceans, and foreign worlds are left entirely to vanilla.
      */
@@ -440,8 +475,8 @@ public final class RiverWaterFiller {
         int tileStartX = (x >> tileShift) << tileShift;
         int tileStartZ = (z >> tileShift) << tileShift;
 
-        // Cache-only: while our features place, the tile always exists; on a world that
-        // is not ours it never does, and vanilla keeps its own rules.
+        // Cache-only: while this mod's features place, the tile is always present; on a
+        // world generated by anything else it never is, and vanilla keeps its own rules.
         HeightmapData data = LocalTerrainProvider.getInstance().peekHeightmap(
                 tileStartZ, tileStartX, tileStartZ + tileSize, tileStartX + tileSize);
         if (data == null || data.waterLevel == null) return true;

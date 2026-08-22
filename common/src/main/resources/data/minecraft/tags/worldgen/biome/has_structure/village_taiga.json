@@ -1,5 +1,6 @@
 {
   "values": [
-    "terrain-diffusion-mc:taiga_sparse"
+    "terrain-diffusion-mc:taiga_sparse",
+    "terrain-diffusion-mc:mixed_forest"
   ]
 }

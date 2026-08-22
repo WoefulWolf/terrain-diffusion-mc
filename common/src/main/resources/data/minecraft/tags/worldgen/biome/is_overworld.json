@@ -4,6 +4,15 @@
     "terrain-diffusion-mc:taiga_sparse",
     "terrain-diffusion-mc:snowy_taiga_sparse",
     "terrain-diffusion-mc:lake",
-    "terrain-diffusion-mc:frozen_lake"
+    "terrain-diffusion-mc:frozen_lake",
+    "terrain-diffusion-mc:desert_scrub",
+    "terrain-diffusion-mc:steppe",
+    "terrain-diffusion-mc:tundra",
+    "terrain-diffusion-mc:mixed_forest",
+    "terrain-diffusion-mc:subtropical_forest",
+    "terrain-diffusion-mc:marsh",
+    "terrain-diffusion-mc:desert_riparian",
+    "terrain-diffusion-mc:heath",
+    "terrain-diffusion-mc:dark_forest_sparse"
   ]
 }

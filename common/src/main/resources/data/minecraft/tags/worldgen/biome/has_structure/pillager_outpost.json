@@ -1,5 +1,10 @@
 {
   "values": [
-    "terrain-diffusion-mc:taiga_sparse"
+    "terrain-diffusion-mc:taiga_sparse",
+    "terrain-diffusion-mc:steppe",
+    "terrain-diffusion-mc:tundra",
+    "terrain-diffusion-mc:desert_scrub",
+    "terrain-diffusion-mc:heath",
+    "terrain-diffusion-mc:desert_riparian"
   ]
 }

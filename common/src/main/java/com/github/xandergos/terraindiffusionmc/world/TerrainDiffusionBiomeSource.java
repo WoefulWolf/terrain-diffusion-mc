@@ -36,6 +36,15 @@ public class TerrainDiffusionBiomeSource extends BiomeSource {
     private static final ResourceKey<Biome> SNOWY_TAIGA_SPARSE = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "snowy_taiga_sparse"));
     private static final ResourceKey<Biome> LAKE = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "lake"));
     private static final ResourceKey<Biome> FROZEN_LAKE = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "frozen_lake"));
+    private static final ResourceKey<Biome> DESERT_SCRUB = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "desert_scrub"));
+    private static final ResourceKey<Biome> STEPPE = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "steppe"));
+    private static final ResourceKey<Biome> TUNDRA = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "tundra"));
+    private static final ResourceKey<Biome> MIXED_FOREST = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "mixed_forest"));
+    private static final ResourceKey<Biome> SUBTROPICAL_FOREST = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "subtropical_forest"));
+    private static final ResourceKey<Biome> MARSH = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "marsh"));
+    private static final ResourceKey<Biome> DESERT_RIPARIAN = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "desert_riparian"));
+    private static final ResourceKey<Biome> HEATH = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "heath"));
+    private static final ResourceKey<Biome> DARK_FOREST_SPARSE = ResourceKey.create(Registries.BIOME, ResourceLocation.fromNamespaceAndPath("terrain-diffusion-mc", "dark_forest_sparse"));
 
     public static final MapCodec<TerrainDiffusionBiomeSource> CODEC = RecordCodecBuilder.mapCodec((instance) ->
             instance.group(
@@ -149,7 +158,16 @@ public class TerrainDiffusionBiomeSource extends BiomeSource {
                     entry((short) 115, this.biomeLookup.getOrThrow(TAIGA_SPARSE)),
                     entry((short) 116, this.biomeLookup.getOrThrow(SNOWY_TAIGA_SPARSE)),
                     entry((short) 136, this.biomeLookup.getOrThrow(LAKE)),
-                    entry((short) 137, this.biomeLookup.getOrThrow(FROZEN_LAKE))
+                    entry((short) 137, this.biomeLookup.getOrThrow(FROZEN_LAKE)),
+                    entry((short) 140, this.biomeLookup.getOrThrow(DESERT_SCRUB)),
+                    entry((short) 141, this.biomeLookup.getOrThrow(STEPPE)),
+                    entry((short) 142, this.biomeLookup.getOrThrow(TUNDRA)),
+                    entry((short) 143, this.biomeLookup.getOrThrow(MIXED_FOREST)),
+                    entry((short) 144, this.biomeLookup.getOrThrow(SUBTROPICAL_FOREST)),
+                    entry((short) 145, this.biomeLookup.getOrThrow(MARSH)),
+                    entry((short) 146, this.biomeLookup.getOrThrow(DESERT_RIPARIAN)),
+                    entry((short) 147, this.biomeLookup.getOrThrow(HEATH)),
+                    entry((short) 148, this.biomeLookup.getOrThrow(DARK_FOREST_SPARSE))
             );
 
             deepDark = vanilla(Biomes.DEEP_DARK);

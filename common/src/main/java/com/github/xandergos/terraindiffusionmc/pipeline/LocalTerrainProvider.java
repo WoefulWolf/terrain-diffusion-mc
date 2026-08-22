@@ -706,6 +706,11 @@ public final class LocalTerrainProvider {
     private static final float RIPARIAN_WOBBLE_BLOCKS = 4f;
     private static final float RIPARIAN_MAX_BANK_BLOCKS = 3.5f;
     private static final float RIPARIAN_BANK_WOBBLE_BLOCKS = 1f;
+    /**
+     * Scrub ring past the green strip, as a share of the strip's reach beyond the water,
+     * so a desert river fades out through shrub rather than stopping at a line of grass.
+     */
+    private static final float RIPARIAN_FRINGE_FACTOR = 0.75f;
 
     /**
      * A river surface never claims below this. The drainage surface can dip under sea
@@ -729,6 +734,8 @@ public final class LocalTerrainProvider {
     private static final float DELTA_MAX_ELEV_BLOCKS = 2f;
     private static final float DELTA_MIN_TEMP_C = 5f;
     private static final float DELTA_MANGROVE_TEMP_C = 26f;
+    /** Below this a silted flat is marsh, not swamp: the swamp's oaks are a warm-country thing. */
+    private static final float WETLAND_SWAMP_MIN_TEMP_C = 12f;
 
     /** Swampy fringes where warm, wet lowland meets a lake at nearly its own level. */
     private static final float LAKE_FRINGE_BASE_BLOCKS = 5f;
@@ -1272,9 +1279,10 @@ public final class LocalTerrainProvider {
                     + RIPARIAN_WOBBLE_BLOCKS * wn) * pFade[k];
             if (beyond <= 0f) continue;
             float reach = pHalf[k] + beyond;
+            float fringe = reach + beyond * RIPARIAN_FRINGE_FACTOR;
 
             // Points outside the tile still green the part of their disc that overlaps it.
-            int R = (int) Math.ceil(reach);
+            int R = (int) Math.ceil(fringe);
             int col = bx - j1, row = bz - i1;
             if (col < -R || col >= width + R || row < -R || row >= height + R) continue;
 
@@ -1288,10 +1296,12 @@ public final class LocalTerrainProvider {
                 for (int dc = -R; dc <= R; dc++) {
                     int c = col + dc;
                     if (c < 0 || c >= width) continue;
-                    if (dr * dr + dc * dc > reach * reach) continue;
+                    int d2 = dr * dr + dc * dc;
+                    if (d2 > fringe * fringe) continue;
                     int idx = r * width + c;
                     if (waterFlat[idx] != Float.NEGATIVE_INFINITY) continue;
-                    short green = riparianFor(biomeFlat[idx]);
+                    short green = d2 <= reach * reach ? riparianFor(biomeFlat[idx])
+                            : riparianFringeFor(biomeFlat[idx]);
                     if (green == 0) continue;
                     float bank = elev[idx] - waterSurf;
                     if (bank < 0f || bank > maxBank) continue;
@@ -1301,16 +1311,24 @@ public final class LocalTerrainProvider {
         }
     }
 
+    /** The strip against the water: sandy with grass and acacia through dry country, wooded through grass. */
     private static short riparianFor(short biome) {
         switch (biome) {
             case BiomeClassifier.DESERT:
             case BiomeClassifier.BADLANDS:
-                return BiomeClassifier.SAVANNA;
+            case BiomeClassifier.DESERT_SCRUB:
+                return BiomeClassifier.DESERT_RIPARIAN;
             case BiomeClassifier.SAVANNA:
+            case BiomeClassifier.STEPPE:
                 return BiomeClassifier.FOREST_SPARSE;
             default:
                 return 0;
         }
+    }
+
+    /** The ring past the strip, where only bare sand has anything to fade through. */
+    private static short riparianFringeFor(short biome) {
+        return biome == BiomeClassifier.DESERT ? BiomeClassifier.DESERT_SCRUB : 0;
     }
 
     /** Marshy delta around a big slack ocean mouth; see the constants above. */
@@ -1352,7 +1370,7 @@ public final class LocalTerrainProvider {
                 float temp = temperature != null ? temperature[idx] : 10f;
                 if (temp < DELTA_MIN_TEMP_C) continue;
                 biomeFlat[idx] = temp >= DELTA_MANGROVE_TEMP_C
-                        ? BiomeClassifier.MANGROVE_SWAMP : BiomeClassifier.SWAMP;
+                        ? BiomeClassifier.MANGROVE_SWAMP : wetlandFor(biomeFlat[idx], temp);
             }
         }
     }
@@ -1367,7 +1385,28 @@ public final class LocalTerrainProvider {
         return biome < 41 || biome > 49;
     }
 
-    /** Swamp ring where warm, wet lowland meets a lake near its own level. */
+    /** Marsh on open country and anywhere too cool for the swamp's oaks; swamp where there was forest to drown. */
+    private static short wetlandFor(short biome, float temp) {
+        if (temp < WETLAND_SWAMP_MIN_TEMP_C) return BiomeClassifier.MARSH;
+        switch (biome) {
+            case BiomeClassifier.PLAINS:
+            case BiomeClassifier.SUNFLOWER_PLAINS:
+            case BiomeClassifier.MEADOW:
+            case BiomeClassifier.STEPPE:
+            case BiomeClassifier.TUNDRA:
+            case BiomeClassifier.HEATH:
+            case BiomeClassifier.SAVANNA:
+            case BiomeClassifier.SAVANNA_PLATEAU:
+            case BiomeClassifier.WINDSWEPT_SAVANNA:
+            case BiomeClassifier.DESERT_SCRUB:
+            case BiomeClassifier.DESERT_RIPARIAN:
+                return BiomeClassifier.MARSH;
+            default:
+                return BiomeClassifier.SWAMP;
+        }
+    }
+
+    /** Wetland ring where warm, wet lowland meets a lake near its own level. */
     private static void stampLakeFringes(List<RiverRegions.Region> regions, float[] elev,
                                          short[] biomeFlat, float[] climate, float[] waterFlat,
                                          int i1, int j1, int height, int width,
@@ -1403,7 +1442,7 @@ public final class LocalTerrainProvider {
                         if (climate[idx] < LAKE_FRINGE_MIN_TEMP_C) continue;
                         if (climate[2 * n + idx] < LAKE_FRINGE_MIN_PRECIP_MM) continue;
                         if (!fringeReplaceable(biomeFlat[idx])) continue;
-                        biomeFlat[idx] = BiomeClassifier.SWAMP;
+                        biomeFlat[idx] = wetlandFor(biomeFlat[idx], climate[idx]);
                     }
                 }
             }
@@ -1413,8 +1452,14 @@ public final class LocalTerrainProvider {
     private static boolean fringeReplaceable(short biome) {
         switch (biome) {
             case BiomeClassifier.PLAINS:
+            case BiomeClassifier.SUNFLOWER_PLAINS:
+            case BiomeClassifier.STEPPE:
+            case BiomeClassifier.HEATH:
             case BiomeClassifier.FOREST:
             case BiomeClassifier.FOREST_SPARSE:
+            case BiomeClassifier.MIXED_FOREST:
+            case BiomeClassifier.SUBTROPICAL_FOREST:
+            case BiomeClassifier.DARK_FOREST_SPARSE:
             case BiomeClassifier.BIRCH_FOREST:
             case BiomeClassifier.DARK_FOREST:
             case BiomeClassifier.MEADOW:

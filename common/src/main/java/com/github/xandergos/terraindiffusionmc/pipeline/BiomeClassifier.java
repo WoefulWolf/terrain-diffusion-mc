@@ -41,6 +41,12 @@ public final class BiomeClassifier {
     static final short WARM_OCEAN = 41, OCEAN = 44, COLD_OCEAN = 46, FROZEN_OCEAN = 48;
     static final short FOREST_SPARSE = 108, TAIGA_SPARSE = 115, SNOWY_TAIGA_SPARSE = 116;
 
+    // Transitions with no vanilla counterpart at all, from 140 up: each is the band
+    // between two vanilla biomes that would otherwise meet along one threshold.
+    static final short DESERT_SCRUB = 140, STEPPE = 141, TUNDRA = 142, MIXED_FOREST = 143;
+    static final short SUBTROPICAL_FOREST = 144, MARSH = 145, DESERT_RIPARIAN = 146;
+    static final short HEATH = 147, DARK_FOREST_SPARSE = 148;
+
     static final short ICE_SPIKES = 4, MANGROVE_SWAMP = 7, BIRCH_FOREST = 10, DARK_FOREST = 11;
     static final short OLD_GROWTH_BIRCH_FOREST = 12, OLD_GROWTH_PINE_TAIGA = 13;
     static final short OLD_GROWTH_SPRUCE_TAIGA = 14, SAVANNA_PLATEAU = 18;
@@ -88,8 +94,23 @@ public final class BiomeClassifier {
             case SNOWY_TAIGA_SPARSE: return SNOWY_TAIGA;
             case LAKE:               return RIVER;
             case FROZEN_LAKE:        return FROZEN_RIVER;
+            case DESERT_SCRUB:       return DESERT;
+            case STEPPE:             return PLAINS;
+            case TUNDRA:             return PLAINS;
+            case MIXED_FOREST:       return FOREST;
+            case SUBTROPICAL_FOREST: return FOREST;
+            case MARSH:              return SWAMP;
+            case DESERT_RIPARIAN:    return SAVANNA;
+            case HEATH:              return WINDSWEPT_HILLS;
+            case DARK_FOREST_SPARSE: return FOREST;
             default:                 return biome;
         }
+    }
+
+    /** Cold ground that trees cannot take: steppe, moor or tundra by its summers. */
+    private static short coldTreeless(float growingSeason, float temp) {
+        if (growingSeason >= STEPPE_MIN_SEASON_DAYS) return STEPPE;
+        return temp >= 0f ? HEATH : TUNDRA;
     }
 
     /**
@@ -136,6 +157,26 @@ public final class BiomeClassifier {
     /** Rain and moisture that separate grass country from bare spruce grove. */
     private static final float MEADOW_MIN_MOISTURE = 0.35f;
     private static final float MEADOW_MIN_PRECIP_MM = 350f;
+    /**
+     * Where the transition bands sit: mixed forest on the warm side of the conifers,
+     * subtropical forest on the warm side of the broadleaf country, the sparse dark
+     * forest just under the moisture that closes the canopy.
+     */
+    private static final float MIXED_FOREST_MIN_TEMP_C = 9f;
+    private static final float SUBTROPICAL_MIN_TEMP_C = 22f;
+    private static final float DARK_FOREST_SPARSE_MIN_MOISTURE = 0.95f;
+    /**
+     * Trees this thin are grassland with the odd oak, vanilla's plains. Treeless ground
+     * is by construction too dry for a sward, so this is the only place a prairie can be.
+     */
+    private static final float PLAINS_MAX_MOISTURE = 0.35f;
+    /**
+     * A cold plain with summers this long is steppe, the Mongolian kind. Shorter summers
+     * are moor above freezing and tundra below it.
+     */
+    private static final float STEPPE_MIN_SEASON_DAYS = 100f;
+    /** Permanent snow needs a mean this far below freezing; nearer it the cover is seasonal. */
+    private static final float SNOW_MAX_TEMP_C = -1f;
 
     // One mask per accent, on distinct seeds so their patches never coincide. The
     // threshold sits at the measured 96th percentile of this spectrum, so each accent
@@ -280,6 +321,9 @@ public final class BiomeClassifier {
                 // Slope overrides
                 boolean slopeMedium = slope >= 0.62f && slope < bareThreshold;
                 boolean slopeBare   = slope >= bareThreshold;
+                // Trees thinned by the slope rather than by dryness keep their family:
+                // a steep face in oak country is thinner oak, not an acacia hillside.
+                boolean slopeThinned = slopeMedium && (treesForest || treesDense || treesRainforest);
                 if (slopeMedium) {
                     if (treesForest || treesDense || treesRainforest) { treesSparse = true; }
                     treesForest = treesForest && false; treesDense = false; treesRainforest = false;
@@ -292,7 +336,7 @@ public final class BiomeClassifier {
                 // Snow classification
                 float snowTemp = temp + snowNoise[idx];
                 boolean isSteep = slope > 0.78f;
-                boolean hasSnow = snowTemp < 0f && precip > 150f && !isSteep;
+                boolean hasSnow = snowTemp < SNOW_MAX_TEMP_C && precip > 150f && !isSteep;
 
                 // Elevation/temp bands, sized against the country around this cell.
                 float localHigh = localRelief == null ? 0f : localRelief[idx];
@@ -336,11 +380,15 @@ public final class BiomeClassifier {
                         else biome = STONY_PEAKS;
                     } else if (hasSnow) {
                         if (treesNone) biome = SNOWY_SLOPES;
-                        else if (treesSparse || treesForest) biome = SNOWY_TAIGA_SPARSE;
-                        else biome = SNOWY_TAIGA;
+                        else if (treesSparse) biome = SNOWY_TAIGA_SPARSE;
+                        // Vanilla's grove: spruce standing in snow on a mountainside.
+                        else biome = GROVE;
                     } else if (treesNone) {
                         if (barren) biome = slopeMedium ? WINDSWEPT_GRAVELLY_HILLS : WINDSWEPT_HILLS;
-                        else if (treeMoisture < MEADOW_MIN_MOISTURE || precip < MEADOW_MIN_PRECIP_MM) biome = GROVE;
+                        // Too dry for meadow grass.
+                        else if (treeMoisture < MEADOW_MIN_MOISTURE || precip < MEADOW_MIN_PRECIP_MM) {
+                            biome = cold || frozen ? coldTreeless(growingSeason, temp) : STEPPE;
+                        }
                         else biome = MEADOW;
                     } else if (treesSparse || treesForest) {
                         // Alpine meadow carries scattered trees rather than none at all.
@@ -366,42 +414,69 @@ public final class BiomeClassifier {
                             biome = slopeMedium ? ERODED_BADLANDS : BADLANDS;
                         }
                         else if (warm || hot) {
-                            // Sand needs genuine aridity. Semi-arid land that merely
-                            // cannot carry trees still carries grass: hot shrub-steppe
-                            // reads as savanna, warm steppe as plains. The moisture
-                            // signal already carries precip noise, so the edge dithers.
+                            // Sand needs real aridity; the semi-arid margin past it
+                            // carries shrub and dry grass. The moisture signal already
+                            // carries noise, so the edges dither.
                             if (treeMoisture < DESERT_MAX_TREE_MOISTURE) biome = DESERT;
-                            else biome = hot ? SAVANNA : PLAINS;
+                            else biome = hot ? DESERT_SCRUB : STEPPE;
                         }
-                        // Temperate treeless country is steppe: grassland too dry or too
-                        // short-seasoned for woods. Grove is snowy spruce country and
-                        // belongs to the cold branches below, not to this one.
-                        else if (temperate) biome = PLAINS;
-                        else if (barren && !lowland && (cold || cool)) biome = GROVE;
-                        else if (treeMoisture < MEADOW_MIN_MOISTURE || precip < MEADOW_MIN_PRECIP_MM) biome = GROVE;
-                        else biome = PLAINS;
+                        // Prairie with rain enough for a sward, steppe with barely that.
+                        else if (temperate) {
+                            biome = treeMoisture < DESERT_MAX_TREE_MOISTURE ? STEPPE : PLAINS;
+                        }
+                        // Cool treeless ground is dry by definition, its season being
+                        // long enough for trees, so it is steppe.
+                        else if (cold || frozen) biome = coldTreeless(growingSeason, temp);
+                        else biome = STEPPE;
                     } else if (treesSparse || treesForest) {
                         if (hot) {
                             if (altM > uplandCut && treeMoisture < WOODED_BADLANDS_MAX_MOISTURE) {
                                 biome = WOODED_BADLANDS;
-                            } else {
-                                biome = treesSparse ? SPARSE_JUNGLE : JUNGLE;
                             }
+                            // Scattered trees on hot ground are savanna woodland; the
+                            // jungle's thinning edge begins where a real forest would.
+                            else if (treesSparse && slopeThinned) biome = SPARSE_JUNGLE;
+                            else if (treesSparse) {
+                                biome = slopeMedium ? WINDSWEPT_SAVANNA
+                                        : altM > uplandCut ? SAVANNA_PLATEAU : SAVANNA;
+                            }
+                            else biome = SPARSE_JUNGLE;
                         }
-                        else if (warm && treesSparse && slopeMedium) biome = WINDSWEPT_SAVANNA;
+                        // Windswept savanna only where the flat ground around would be savanna.
+                        else if (warm && treesSparse && slopeMedium) {
+                            biome = slopeThinned ? FOREST_SPARSE : WINDSWEPT_SAVANNA;
+                        }
                         else if (warm && treesSparse) {
                             biome = altM > uplandCut ? SAVANNA_PLATEAU : SAVANNA;
                         }
                         else if (warm && treesForest) biome = FOREST_SPARSE;
+                        // Moor, the cool counterpart of windswept savanna, and forest-tundra
+                        // in the cold; only where the trees are thin in their own right,
+                        // since a slope that thinned a forest leaves that forest.
+                        else if ((cool || cold) && treesSparse && !slopeThinned
+                                && (slopeMedium || altM > uplandCut)) {
+                            biome = cool ? HEATH : TUNDRA;
+                        }
+                        // Prairie: grass with the odd tree, between steppe and open woodland.
+                        else if ((temperate || cool) && treesSparse && !slopeMedium
+                                && effTreeMoisture < PLAINS_MAX_MOISTURE) biome = PLAINS;
                         else if (temperate) biome = FOREST_SPARSE;
+                        // The warm side of the conifer country is mixed woodland.
+                        else if (treesForest && temp >= MIXED_FOREST_MIN_TEMP_C) biome = MIXED_FOREST;
                         else biome = TAIGA_SPARSE;
                     } else if (treesDense) {
                         if (hot) biome = precip > BAMBOO_JUNGLE_MIN_PRECIP_MM ? BAMBOO_JUNGLE : JUNGLE;
                         else if (warm && lowland) biome = SWAMP;
+                        // Broadleaf forest on the warm side of the jungle line.
+                        else if (warm && temp >= SUBTROPICAL_MIN_TEMP_C) biome = SUBTROPICAL_FOREST;
                         else if (cool || cold) {
-                            biome = effTreeMoisture >= OLD_GROWTH_MIN_MOISTURE ? OLD_GROWTH_PINE_TAIGA : TAIGA;
+                            if (effTreeMoisture >= OLD_GROWTH_MIN_MOISTURE) biome = OLD_GROWTH_PINE_TAIGA;
+                            else if (temp >= MIXED_FOREST_MIN_TEMP_C) biome = MIXED_FOREST;
+                            else biome = TAIGA;
                         }
                         else if (temperate && effTreeMoisture >= DARK_FOREST_MIN_MOISTURE) biome = DARK_FOREST;
+                        // The canopy thins before the dark forest ends.
+                        else if (temperate && effTreeMoisture >= DARK_FOREST_SPARSE_MIN_MOISTURE) biome = DARK_FOREST_SPARSE;
                         else if (temperate && temp < BIRCH_FOREST_MAX_TEMP_C) biome = BIRCH_FOREST;
                         else biome = FOREST;
                     } else { // rainforest
@@ -411,7 +486,10 @@ public final class BiomeClassifier {
                         else if (hot || (warm && temp >= 18f && tStd < 5f)) {
                             biome = precip > BAMBOO_JUNGLE_MIN_PRECIP_MM ? BAMBOO_JUNGLE : JUNGLE;
                         }
-                        else if (lowland) biome = SWAMP;
+                        // Drowned lowland is swamp where the swamp's oaks can grow, bog
+                        // where they cannot.
+                        else if (lowland) biome = cool || cold || frozen ? MARSH : SWAMP;
+                        else if (warm && temp >= SUBTROPICAL_MIN_TEMP_C) biome = SUBTROPICAL_FOREST;
                         else if (cool || cold) biome = OLD_GROWTH_SPRUCE_TAIGA;
                         else if (temperate && temp < BIRCH_FOREST_MAX_TEMP_C) biome = OLD_GROWTH_BIRCH_FOREST;
                         else biome = FOREST;

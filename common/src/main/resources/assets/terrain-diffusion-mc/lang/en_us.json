@@ -9,5 +9,14 @@
   "biome.terrain-diffusion-mc.taiga_sparse": "Sparse Taiga",
   "biome.terrain-diffusion-mc.snowy_taiga_sparse": "Sparse Snowy Taiga",
   "biome.terrain-diffusion-mc.lake": "Lake",
-  "biome.terrain-diffusion-mc.frozen_lake": "Frozen Lake"
+  "biome.terrain-diffusion-mc.frozen_lake": "Frozen Lake",
+  "biome.terrain-diffusion-mc.desert_scrub": "Desert Scrub",
+  "biome.terrain-diffusion-mc.steppe": "Steppe",
+  "biome.terrain-diffusion-mc.tundra": "Tundra",
+  "biome.terrain-diffusion-mc.mixed_forest": "Mixed Forest",
+  "biome.terrain-diffusion-mc.subtropical_forest": "Subtropical Forest",
+  "biome.terrain-diffusion-mc.marsh": "Marsh",
+  "biome.terrain-diffusion-mc.desert_riparian": "Desert Riverbank",
+  "biome.terrain-diffusion-mc.heath": "Heath",
+  "biome.terrain-diffusion-mc.dark_forest_sparse": "Sparse Dark Forest"
 }

@@ -440,8 +440,9 @@ public final class RiverWaterFiller {
      */
     private static boolean bankIsDamp(short biomeId) {
         return switch (biomeId) {
-            // desert, the badlands, the savannas
-            case 5, 26, 27, 28, 17, 18, 22 -> false;
+            // desert, the badlands, the savannas, and the scrub, steppe and riverbank
+            // strips that lie between them
+            case 5, 26, 27, 28, 17, 18, 22, 140, 141, 146 -> false;
             // snowy plains and taiga, ice spikes, grove, snowy slopes and the frozen peaks
             case 3, 4, 16, 31, 32, 33, 34, 39, 116 -> false;
             default -> true;

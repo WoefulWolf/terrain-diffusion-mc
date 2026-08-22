@@ -1,5 +1,6 @@
 {
   "values": [
-    "terrain-diffusion-mc:snowy_taiga_sparse"
+    "terrain-diffusion-mc:snowy_taiga_sparse",
+    "terrain-diffusion-mc:tundra"
   ]
 }

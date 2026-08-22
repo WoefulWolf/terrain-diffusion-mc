@@ -84,6 +84,16 @@ public final class BiomeColors {
         // are one colour here.
         put(136, "lake",                    0x3A6FD0);
         put(137, "frozen_lake",             0x93BEDC);
+        // Transitions: between their neighbours' colours, matching neither.
+        put(140, "desert_scrub",            0xD2C47F);
+        put(141, "steppe",                  0xC5BC6E);
+        put(142, "tundra",                  0xB3C2AE);
+        put(143, "mixed_forest",            0x4C8A55);
+        put(144, "subtropical_forest",      0x3D8C3B);
+        put(145, "marsh",                   0x5F8358);
+        put(146, "desert_riparian",         0xA9BA6B);
+        put(147, "heath",                   0x8FA171);
+        put(148, "dark_forest_sparse",        0x3E6B3A);
     }
 
     private BiomeColors() {

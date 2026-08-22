@@ -25,6 +25,14 @@ Every vanilla overworld biome generates, and with them every vanilla overworld s
 
 `badlands` and `meadow` generate as well, and `river` / `frozen_river` come with the river system below.
 
+### Transition biomes
+
+Vanilla's biomes meet along hard lines: sand against a green lawn, oak forest against spruce at one degree of temperature. Nine biomes of this mod's own fill those seams: `desert_scrub`, `steppe`, `tundra`, `mixed_forest`, `subtropical_forest`, `marsh`, `desert_riparian`, `heath` and `dark_forest_sparse`. None is a destination in itself; each is the band two vanilla biomes would have between them in the real world.
+
+They sit behind the **Extra biomes** toggle in the world's [Terrain Settings](#per-world-settings), together with the sparse forests and lakes. Switched off, each falls back to its nearest vanilla biome and the world uses vanilla biome keys only.
+
+A few vanilla placements changed alongside, toggle or not: scattered trees on hot ground are savanna rather than sparse jungle; `grove` is once again spruce on snow on a mountainside rather than the treeless brown grassland it had been standing in for; `plains` is grassland with the odd tree between steppe and sparse forest; and trees thinned by a steep slope keep their family instead of becoming a streak of windswept savanna.
+
 ### Shorelines
 
 Coasts are read from the terrain the way real ones work: where the land meets the ocean on a gentle gradient, waves can deposit sediment, so a `beach` forms — wide on flat coasts, a thin ribbon on steeper ones, `snowy_beach` where the country behind it is snowy. Steep coastal faces become rocky `stony_shore` headlands instead, and genuine sea cliffs stay cliffs. Swamp and mangrove coasts keep their muddy edges, as they should. Ocean floors got matching attention — sand under warm and temperate water, gravel under cold and deep.
@@ -64,7 +72,7 @@ Rivers are configured per world at creation — see [Per-world settings](#per-wo
 
 `ancient_city`, `ocean_monument` and `woodland_mansion` now have biomes to generate in, which brings with them sculk, the warden, echo shards, Swift Sneak, sponge, prismarine, elder guardians and dark oak. Beaches unlock `buried_treasure` and `shipwreck_beached` on top of that.
 
-The three custom biomes — `forest_sparse`, `taiga_sparse` and `snowy_taiga_sparse` — now carry the same biome tags as their vanilla counterparts, so structures generate in them and modded content keyed off `#minecraft:is_*` or `#c:is_*` applies to them too.
+The custom biomes — the sparse forests, the lakes and the transition biomes — carry the same biome tags as their nearest vanilla counterparts, so structures generate in them (plains villages on the steppe, savanna villages along desert rivers, witch huts in the marsh) and modded content keyed off `#minecraft:is_*` or `#c:is_*` applies to them too.
 
 ### Mod compatibility
 
@@ -177,6 +185,8 @@ Two of them pull against each other. **Rarity** decides how many separate river 
 **Caves**: two cover depths control how far below the surface caves must stay in gentle country — one for small tunnels and ravines, one for big caverns and their wide mouths. Craggy, rocky, and karst-like country still opens as described above. Set a field to `0` to switch that gate off and let those breaks appear anywhere, the way vanilla generates.
 
 **Climate**: pole distance (blocks from equator to pole, default 30,000 — the north pole is a 15,000-block trek from a default spawn, about 45 minutes of sprinting), start latitude (0 equator to 90 north pole, default 45), and band strength (°C at the extremes, default 25; `0` disables latitude banding). Worlds created before this feature keep banding off.
+
+**Extra biomes**: whether the mod's own biomes generate — the sparse forests, the lakes and the [transition biomes](#transition-biomes). Off, every one of them falls back to its nearest vanilla biome, for packs that key on vanilla biome ids alone.
 
 ## Common Issues
 

@@ -1,5 +1,8 @@
 {
   "values": [
-    "terrain-diffusion-mc:forest_sparse"
+    "terrain-diffusion-mc:forest_sparse",
+    "terrain-diffusion-mc:mixed_forest",
+    "terrain-diffusion-mc:subtropical_forest",
+    "terrain-diffusion-mc:dark_forest_sparse"
   ]
 }

@@ -1,6 +1,9 @@
 {
   "values": [
     "terrain-diffusion-mc:taiga_sparse",
-    "terrain-diffusion-mc:snowy_taiga_sparse"
+    "terrain-diffusion-mc:snowy_taiga_sparse",
+    "terrain-diffusion-mc:mixed_forest",
+    "terrain-diffusion-mc:heath",
+    "terrain-diffusion-mc:tundra"
   ]
 }
